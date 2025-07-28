@@ -5,8 +5,8 @@ from typing import Any, Dict, Optional
 from fastapi import BackgroundTasks, FastAPI
 from pydantic import BaseModel
 
-from .dag_engine import ReplayManager, build_default_dag, build_trace_id
-from .node_interface import list_registered_nodes, replay_writer
+from .dag_engine import ReplayManager, build_trace_id
+from .node_interface import list_registered_nodes
 from .prompt_context import parse_input_context
 
 
@@ -31,29 +31,29 @@ class NodeStatus(BaseModel):
 app = FastAPI()
 
 _tasks: Dict[str, TaskResult] = {}
-_replay = ReplayManager()
+# _replay = ReplayManager()
 
 
-def _run_dag(trace_id: str, task: TaskSubmission) -> None:
-    result = TaskResult(trace_id=trace_id, status="running")
-    _tasks[trace_id] = result
-    try:
-        builder = build_default_dag()
-        runner = builder.build_default_flow()
-        replay_writer.init_trace(trace_id=trace_id, task_name=task.task_name)
-        ctx = parse_input_context(task.input_context)
-        output = runner.invoke(
-            {"raw_event": ctx.context_summary, "trace_id": trace_id}
-        )
-        replay_writer.finalize_trace()
-        result.status = "completed"
-        result.dag_output = output
-        _replay.save(trace_id, {"input": task.dict(), "output": output})
-    except Exception as exc:  # pragma: no cover - background errors
-        result.status = "failed"
-        result.trace_summary = str(exc)
-    finally:
-        _tasks[trace_id] = result
+# def _run_dag(trace_id: str, task: TaskSubmission) -> None:
+#     result = TaskResult(trace_id=trace_id, status="running")
+#     _tasks[trace_id] = result
+#     try:
+#         # builder = build_default_dag()
+#         # runner = builder.build_default_flow()
+#         # replay_writer.init_trace(trace_id=trace_id, task_name=task.task_name)
+#         # ctx = parse_input_context(task.input_context)
+#         # output = runner.invoke(
+#         #     {"raw_event": ctx.context_summary, "trace_id": trace_id}
+#         # )
+#         # replay_writer.finalize_trace()
+#         # result.status = "completed"
+#         # result.dag_output = output
+#         # _replay.save(trace_id, {"input": task.dict(), "output": output})
+#     except Exception as exc:  # pragma: no cover - background errors
+#         result.status = "failed"
+#         result.trace_summary = str(exc)
+#     finally:
+#         _tasks[trace_id] = result
 
 
 @app.post("/run", response_model=TaskResult)

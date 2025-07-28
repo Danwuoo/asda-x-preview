@@ -12,7 +12,7 @@ import os
 import sqlite3
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 import jsonlines
@@ -29,7 +29,7 @@ class NodeExecutionTrace(BaseModel):
     output: Optional[Dict[str, Any]] = None
     status: str = "success"
     runtime_ms: Optional[float] = None
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     error_msg: Optional[str] = None
 
 
@@ -46,7 +46,7 @@ class TraceRecord(BaseModel):
 
     trace_id: str
     task_name: str
-    start_time: datetime = Field(default_factory=datetime.utcnow)
+    start_time: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     end_time: Optional[datetime] = None
     executed_nodes: List[NodeExecutionTrace] = Field(default_factory=list)
     replay_info: ReplayMetadata = Field(default_factory=ReplayMetadata)
@@ -121,7 +121,7 @@ class ReplayWriter:
 
         if self._current is None:
             raise RuntimeError("init_trace must be called first")
-        self._current.end_time = datetime.utcnow()
+        self._current.end_time = datetime.now(timezone.utc)
         record = self._current
         os.makedirs(self.store, exist_ok=True)
         path = os.path.join(self.store, f"trace_{record.trace_id}.jsonl")
