@@ -1,148 +1,149 @@
-"""Node Interface module for ASDA-X."""
+# src/core/node_interface.py
 
-from __future__ import annotations
-
-import time
+import inspect
 import uuid
+from datetime import datetime
 from functools import wraps
-from typing import Any, Callable, Dict, Generic, List, Optional, Type, TypeVar
+from typing import Any, Callable, Dict, Generic, List, Literal, Optional, Type, TypeVar
 
 from pydantic import BaseModel, Field
 
-from .trace_logger import JSONLSink, TraceLogger, log_node_event
-from .replay_trace import ReplayWriter
-
-
+# 1. NodeMeta
 class NodeMeta(BaseModel):
-    """Metadata for a DAG node."""
-
-    name: str
+    """
+    Represents the metadata of a node in the DAG.
+    """
+    node_name: str
     version: str
     tags: List[str] = Field(default_factory=list)
-    trace_id: str
-    timestamp: float
+    replay_trace_id: Optional[str] = None
+    runtime_timestamp: datetime = Field(default_factory=datetime.utcnow)
 
-
+# 2. BaseInputSchema / BaseOutputSchema
 class BaseInputSchema(BaseModel):
-    """Base fields for all node input schemas."""
-
-    trace_id: Optional[str] = None
-    context_id: Optional[str] = None
-    timestamp: Optional[float] = None
-
+    """
+    Base class for all node input schemas.
+    """
+    trace_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    context_tags: List[str] = Field(default_factory=list)
 
 class BaseOutputSchema(BaseModel):
-    """Base fields for all node output schemas."""
+    """
+    Base class for all node output schemas.
+    """
+    execution_timestamp: datetime = Field(default_factory=datetime.utcnow)
+    node_meta: Optional[NodeMeta] = None
 
-    trace_id: Optional[str] = None
-    context_id: Optional[str] = None
-    timestamp: Optional[float] = None
-
-
-InT = TypeVar("InT", bound=BaseInputSchema)
-OutT = TypeVar("OutT", bound=BaseOutputSchema)
-
-
-class NodeExecutionContext(Generic[InT, OutT]):
-    """Helper for managing node execution context."""
-
-    def __init__(self, trace_id: Optional[str] = None) -> None:
+# 3. NodeExecutionContext
+class NodeExecutionContext:
+    """
+    A helper class to manage the execution context of a node.
+    """
+    def __init__(self, trace_id: Optional[str] = None):
         self.trace_id = trace_id or str(uuid.uuid4())
+        self.timestamp = datetime.utcnow()
 
-    def build_meta(
-        self, name: str, version: str, tags: Optional[List[str]] = None
-    ) -> NodeMeta:
-        return NodeMeta(
-            name=name,
-            version=version,
-            tags=tags or [],
-            trace_id=self.trace_id,
-            timestamp=time.time(),
-        )
-
-
-# Node registry for optional lookup
-_NODE_REGISTRY: Dict[str, Callable[..., Any]] = {}
-
-# Default observability utilities used by nodes
-default_logger = TraceLogger(JSONLSink("data/trace_events.jsonl"))
-
-
-def register_node(name: str, func: Callable[..., Any]) -> None:
-    """Register node by name."""
-    _NODE_REGISTRY[name] = func
-
-
-def list_registered_nodes() -> List[str]:
-    return list(_NODE_REGISTRY.keys())
-
+# 4. asda_node Decorator
+InputSchema = TypeVar("InputSchema", bound=BaseInputSchema)
+OutputSchema = TypeVar("OutputSchema", bound=BaseOutputSchema)
 
 def asda_node(
-    *,
     name: Optional[str] = None,
-    version: str = "",
+    version: str = "v1.0",
     tags: Optional[List[str]] = None,
     capture_io: bool = True,
-    input_model: Optional[Type[InT]] = None,
-    output_model: Optional[Type[OutT]] = None,
-    replay_writer: Optional[ReplayWriter] = None,
-) -> Callable[[Callable[[InT], OutT]], Callable[[InT], OutT]]:
-    """Decorator to wrap a function as an ASDA node."""
-
-    def decorator(func: Callable[[InT], OutT]) -> Callable[[InT], OutT]:
+) -> Callable[..., Callable[..., OutputSchema]]:
+    """
+    A decorator to wrap any function into a standardized DAG node.
+    """
+    def decorator(func: Callable[..., Any]) -> Callable[..., OutputSchema]:
         node_name = name or func.__name__
+        sig = inspect.signature(func)
+
+        # Extract and validate input schema from function signature
+        input_schema_type: Optional[Type[BaseInputSchema]] = None
+        for param in sig.parameters.values():
+            if param.annotation is not inspect.Parameter.empty and isinstance(param.annotation, type) and issubclass(param.annotation, BaseInputSchema):
+                input_schema_type = param.annotation
+                break
+
+        if not input_schema_type:
+            raise TypeError(f"Node '{node_name}' must have an input parameter annotated with a subclass of BaseInputSchema.")
+
+        # Extract and validate output schema from function signature
+        output_schema_type: Type[BaseOutputSchema] = sig.return_annotation
+        if not (isinstance(output_schema_type, type) and issubclass(output_schema_type, BaseOutputSchema)):
+             raise TypeError(f"Node '{node_name}' must have a return type annotation that is a subclass of BaseOutputSchema.")
 
         @wraps(func)
-        def wrapper(data: InT) -> OutT:
-            ctx = NodeExecutionContext(trace_id=data.trace_id)
-            meta = ctx.build_meta(node_name, version, tags)
-            if isinstance(data, BaseModel):
-                payload = data.model_copy(
-                    update={
-                        "trace_id": meta.trace_id,
-                        "timestamp": meta.timestamp,
-                    }
-                )
+        def wrapper(*args: Any, **kwargs: Any) -> OutputSchema:
+            # Create and validate input schema
+            input_data = args[0] if args else kwargs
+            if isinstance(input_data, dict):
+                input_schema = input_schema_type(**input_data)
+            elif isinstance(input_data, BaseInputSchema):
+                input_schema = input_data
             else:
-                payload = data
-            if input_model is not None:
-                payload = input_model.model_validate(payload)
-            with log_node_event(default_logger, node_name, version) as _:
-                result = func(payload)
-            if output_model is not None:
-                result = output_model.model_validate(result)
-            if capture_io and isinstance(result, BaseModel):
-                result = result.model_copy(
-                    update={
-                        "trace_id": meta.trace_id,
-                        "timestamp": meta.timestamp,
-                    }
-                )
-            if replay_writer:
-                if getattr(replay_writer, "_current", None) is None:
-                    replay_writer.init_trace()
-                replay_writer.record_node_output(
-                    node_name,
-                    payload.model_dump() if isinstance(payload, BaseModel) else payload,
-                    result.model_dump() if isinstance(result, BaseModel) else result,
-                    version,
-                )
-            register_node(node_name, wrapper)
-            return result
+                raise TypeError(f"Invalid input type for node '{node_name}'. Expected a dictionary or BaseInputSchema subclass.")
+
+            # Create execution context and metadata
+            context = NodeExecutionContext(trace_id=input_schema.trace_id)
+            node_meta = NodeMeta(
+                node_name=node_name,
+                version=version,
+                tags=tags or [],
+                replay_trace_id=input_schema.trace_id, # Assuming trace_id can be used for replay
+                runtime_timestamp=context.timestamp,
+            )
+
+            # TODO: Add trace logging here if capture_io is True
+
+            # Execute the node's core logic
+            output_data = func(input_schema)
+
+            # Create and validate output schema
+            if isinstance(output_data, dict):
+                output_schema = output_schema_type(node_meta=node_meta, **output_data)
+            elif isinstance(output_data, BaseOutputSchema):
+                output_schema = output_data
+                output_schema.node_meta = node_meta
+            else:
+                # Attempt to find a field in the output schema that can hold the output_data
+                output_fields = output_schema_type.model_fields
+                # Heuristic: find a field that is not part of the BaseOutputSchema
+                base_fields = BaseOutputSchema.model_fields.keys()
+                target_field = None
+                for field_name, field in output_fields.items():
+                    if field_name not in base_fields:
+                        target_field = field_name
+                        break
+                if target_field:
+                    output_schema = output_schema_type(node_meta=node_meta, **{target_field: output_data})
+                else:
+                    raise TypeError(f"Cannot automatically assign output of type {type(output_data)} to any field in {output_schema_type.__name__}.")
+
+
+            # TODO: Add trace logging for output here if capture_io is True
+
+            return output_schema
 
         return wrapper
-
     return decorator
 
+# 5. register_node / list_registered_nodes
+NODE_REGISTRY: Dict[str, Callable[..., Any]] = {}
 
-__all__ = [
-    "NodeMeta",
-    "BaseInputSchema",
-    "BaseOutputSchema",
-    "NodeExecutionContext",
-    "asda_node",
-    "register_node",
-    "list_registered_nodes",
-    "default_logger",
-    "replay_writer",
-]
+def register_node(node_function: Callable[..., Any], name: Optional[str] = None) -> None:
+    """
+    Registers a node in the global registry.
+    """
+    node_name = name or node_function.__name__
+    if node_name in NODE_REGISTRY:
+        raise ValueError(f"Node with name '{node_name}' is already registered.")
+    NODE_REGISTRY[node_name] = node_function
+
+def list_registered_nodes() -> List[str]:
+    """
+    Returns a list of all registered node names.
+    """
+    return list(NODE_REGISTRY.keys())
