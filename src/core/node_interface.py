@@ -97,7 +97,7 @@ def asda_node(
             ctx = NodeExecutionContext(trace_id=data.trace_id)
             meta = ctx.build_meta(node_name, version, tags)
             if isinstance(data, BaseModel):
-                payload = data.copy(
+                payload = data.model_copy(
                     update={
                         "trace_id": meta.trace_id,
                         "timestamp": meta.timestamp,
@@ -106,13 +106,13 @@ def asda_node(
             else:
                 payload = data
             if input_model is not None:
-                payload = input_model.parse_obj(payload)
+                payload = input_model.model_validate(payload)
             with log_node_event(default_logger, node_name, version) as _:
                 result = func(payload)
             if output_model is not None:
-                result = output_model.parse_obj(result)
+                result = output_model.model_validate(result)
             if capture_io and isinstance(result, BaseModel):
-                result = result.copy(
+                result = result.model_copy(
                     update={
                         "trace_id": meta.trace_id,
                         "timestamp": meta.timestamp,
@@ -123,8 +123,8 @@ def asda_node(
                     replay_writer.init_trace()
                 replay_writer.record_node_output(
                     node_name,
-                    payload.dict() if isinstance(payload, BaseModel) else payload,
-                    result.dict() if isinstance(result, BaseModel) else result,
+                    payload.model_dump() if isinstance(payload, BaseModel) else payload,
+                    result.model_dump() if isinstance(result, BaseModel) else result,
                     version,
                 )
             register_node(node_name, wrapper)

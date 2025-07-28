@@ -11,7 +11,7 @@ from src.core.trace_logger import (
 
 def test_trace_event_schema():
     event = TraceEvent(trace_id="1", node_name="n", version="v")
-    data = event.dict()
+    data = event.model_dump()
     assert data["trace_id"] == "1"
     assert data["node_name"] == "n"
 
@@ -25,6 +25,6 @@ def test_log_node_event():
         with open(path, "r", encoding="utf-8") as f:
             lines = f.readlines()
         assert len(lines) == 1
-        record = TraceEvent.parse_raw(lines[0])
+        record = TraceEvent.model_validate_json(lines[0])
         assert record.node_name == "test"
         assert record.status == "success"

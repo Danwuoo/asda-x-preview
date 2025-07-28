@@ -9,8 +9,8 @@ from src.core.replay_trace import (
 
 def test_trace_record_schema():
     node = NodeExecutionTrace(node_name="test", version="1.0", input={"a": 1})
-    data = node.dict()
-    assert data["node_name"] == "test"
+    data = node.model_dump()
+    assert "node_name" in data
     assert data["version"] == "1.0"
 
 

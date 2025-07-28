@@ -59,20 +59,52 @@ class BaseParser:
 class LogParser(BaseParser):
     source_type = "log"
 
+    # Regex to find common entities in logs
+    _ip_regex = re.compile(r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b")
+    _user_regex = re.compile(r"\bUser\s'(\w+)'", re.IGNORECASE)
+    _id_regex = re.compile(r"\b(id|uuid|request_id)[=:](\S+)\b", re.IGNORECASE)
+
     def parse(self, data: Any) -> PromptContext:
         if isinstance(data, str):
-            data = json.loads(data)
-        if not isinstance(data, dict):
-            raise TypeError("LogParser expects dict or JSON string")
+            try:
+                data = json.loads(data)
+            except json.JSONDecodeError:
+                # If it's not a JSON string, treat it as a raw log message
+                pass
 
-        time_str = data.get("time") or datetime.utcnow().isoformat()
+        if isinstance(data, str):
+            message = data
+            log_dict = {}
+        elif isinstance(data, dict):
+            message = data.get("message", "")
+            log_dict = data
+        else:
+            raise TypeError("LogParser expects a dict, JSON string, or raw string.")
+
+        time_str = log_dict.get("time") or datetime.utcnow().isoformat()
+        time_val = datetime.fromisoformat(time_str)
+
+        entities = []
+        if message:
+            entities.append(EntitySchema(type="message", value=message))
+            # Extract entities from the message using regex
+            ips = self._ip_regex.findall(message)
+            for ip in ips:
+                entities.append(EntitySchema(type="ip", value=ip))
+            users = self._user_regex.findall(message)
+            for user in users:
+                entities.append(EntitySchema(type="user", value=user))
+            ids = self._id_regex.findall(message)
+            for key, val in ids:
+                entities.append(EntitySchema(type=key, value=val))
+
         return PromptContext(
             source_type=self.source_type,
-            agent_id=data.get("agent_id", "unknown"),
-            time=datetime.fromisoformat(time_str),
-            entities=[EntitySchema(type="message", value=data.get("message", ""))],
-            actions=data.get("actions", []),
-            context_summary=data.get("message", ""),
+            agent_id=log_dict.get("agent_id", "unknown"),
+            time=time_val,
+            entities=entities,
+            actions=log_dict.get("actions", []),
+            context_summary=message,
         )
 
 
@@ -135,14 +167,13 @@ import spacy
 class FreeTextParser(BaseParser):
     source_type = "text"
     _nlp = None
+    _ip_regex = re.compile(r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b")
 
     def __init__(self):
         if FreeTextParser._nlp is None:
             try:
                 FreeTextParser._nlp = spacy.load("en_core_web_sm")
             except OSError:
-                # Model not found, you might need to download it:
-                # python -m spacy download en_core_web_sm
                 raise RuntimeError("Spacy 'en_core_web_sm' model not found. Please download it.")
 
     _time_regex = re.compile(r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})")
@@ -159,6 +190,13 @@ class FreeTextParser(BaseParser):
         lang = detect(data)
         doc = self._nlp(data)
         entities = [EntitySchema(type=ent.label_, value=ent.text) for ent in doc.ents]
+
+        # Add IPs found by regex
+        ips = self._ip_regex.findall(data)
+        for ip in ips:
+            # Avoid duplicating IPs that might be picked up by NER
+            if not any(e.value == ip and e.type == "ip" for e in entities):
+                 entities.append(EntitySchema(type="ip", value=ip))
 
         return PromptContext(
             source_type=self.source_type,
@@ -231,22 +269,25 @@ class PromptComposer:
         :return: The rendered prompt as a string.
         """
         template = self.env.get_template(template_name)
-        return template.render(**context.dict())
+        return template.render(**context.model_dump())
 
 
 class InjectionSanitizer:
     """Detects and sanitizes potential prompt injection attacks."""
 
-    # Expanded pattern to detect more template-like syntax and other suspicious patterns
+    # Greatly expanded pattern to detect a wider range of injection techniques
     _pattern = re.compile(
         r"(\{\{.*?\}\})|"  # Jinja2-like templates
         r"(<%.*?%>)|"  # EJS-like templates
         r"(#include.*)|"  # C-style includes
-        r"(\b(exec|eval|system|os.system)\b)|"  # Common code execution functions
-        r"(---\s*)"  # YAML front matter
+        r"(\b(exec|eval|system|os.system|__import__)\b)|"  # Dangerous functions
+        r"(---\s*)|"  # YAML front matter
+        r"(<script.*?>)|"  # HTML script tags
+        r"(javascript:.*)|"  # Javascript URIs
+        r"(\b(on\w+)\s*=)"  # HTML event handlers
     )
 
-    def check(self, text: str) -> None:
+    def check(self, text: str, high_sensitivity: bool = True) -> None:
         """
         Checks for suspicious patterns in the input text.
         Raises a ValueError if a potential injection is detected.
@@ -254,16 +295,19 @@ class InjectionSanitizer:
         if self._pattern.search(text):
             raise ValueError("Possible prompt injection detected due to suspicious patterns.")
 
-        # Check for mixed language scripts, which can be a sign of obfuscation
-        try:
-            primary_lang = detect(text)
-            if any(c > '\u007F' for c in text):  # Check for non-ASCII characters
-                # A more sophisticated check could involve multiple language detection libraries
-                # or analyzing script blocks, but this is a simple first pass.
-                pass # For now, we'll just pass, but a warning could be logged here.
-        except Exception:
-            # Langdetect can fail on very short or ambiguous strings
-            pass
+        if high_sensitivity:
+            # Check for mixed language scripts, which can be a sign of obfuscation
+            try:
+                # Use langdetect to find the primary language
+                primary_lang = detect(text)
+                # A simple check for non-ASCII characters in a predominantly English text
+                if primary_lang == 'en' and any(ord(c) > 127 for c in text):
+                    # This could be legitimate, but it's worth flagging in high-sensitivity mode
+                    # A more advanced version could use a library to check for multiple scripts (e.g., Latin, Cyrillic)
+                    pass  # For now, we just pass, but a warning could be logged here.
+            except Exception:
+                # langdetect can fail on short or ambiguous text
+                pass
 
 
 __all__ = [

@@ -148,10 +148,13 @@ class ReplayReader:
         self.store = store
         self.use_sqlite = use_sqlite
         self._conn: Optional[sqlite3.Connection] = None
+        self._db: Optional[TinyDB] = None
         if self.use_sqlite:
             path = os.path.join(self.store, "replay.db")
             if os.path.exists(path):
                 self._conn = sqlite3.connect(path)
+        else:
+            self._db = TinyDB(os.path.join(self.store, "replay.json"))
 
     def load(self, trace_id: str) -> TraceRecord:
         """Load trace from storage."""
@@ -163,17 +166,15 @@ class ReplayReader:
             row = cur.fetchone()
             if row:
                 data = json.loads(row[0])
-                return TraceRecord.parse_obj(data)
+                return TraceRecord.model_validate(data)  # Pydantic v2 compatible
+
         path = os.path.join(self.store, f"trace_{trace_id}.jsonl")
         if os.path.exists(path):
             with jsonlines.open(path, mode="r") as reader:
                 data = reader.read()
-            return TraceRecord.parse_obj(data)
-        if self._db is not None:
-            result = self._db.search(Query().trace_id == trace_id)
-            if result:
-                return TraceRecord.parse_obj(result[0])
-        raise FileNotFoundError(trace_id)
+            return TraceRecord.model_validate(data)
+
+        raise FileNotFoundError(f"No trace found for trace_id: {trace_id}")
 
 
 @dataclass
