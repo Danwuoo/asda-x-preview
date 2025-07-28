@@ -1,0 +1,3 @@
+# Configuration template for ASDA-X
+inference:
+  provider: watsonx.ai
