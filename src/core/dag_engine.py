@@ -5,7 +5,7 @@ import os
 import uuid
 from typing import Any, Callable, Dict, List, Optional, Type
 
-from langchain_core.pydantic_v1 import BaseModel
+from langchain_core.pydantic_v1 import BaseModel, Field
 from langgraph.graph import END, StateGraph
 
 from src.core.node_interface import asda_node
