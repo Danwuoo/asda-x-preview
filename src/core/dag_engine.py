@@ -1,5 +1,3 @@
-"""Simple DAG Engine skeleton for ASDA-X."""
-
 from __future__ import annotations
 
 import json
@@ -7,184 +5,119 @@ import os
 import uuid
 from typing import Any, Callable, Dict, List, Optional, Type
 
-from pydantic import BaseModel
+from langchain_core.pydantic_v1 import BaseModel
+from langgraph.graph import END, StateGraph
+
+from src.core.node_interface import asda_node
+from src.core.prompt_context import PromptContext
+from src.core.replay_trace import ReplayReader, ReplayWriter, TraceRecord
 
 
-class NodeWrapper:
-    """Wrap a callable node with basic validation and metadata."""
+class DAGState(BaseModel):
+    """Represents the state of the DAG."""
 
-    def __init__(
-        self,
-        func: Callable[[Dict[str, Any]], Dict[str, Any]],
-        *,
-        name: str = "",
-        version: str = "",
-        input_model: Optional[Type[BaseModel]] = None,
-        output_model: Optional[Type[BaseModel]] = None,
-    ) -> None:
-        self.func = func
-        self.name = name
-        self.version = version
-        self.input_model = input_model
-        self.output_model = output_model
+    input_data: Any
+    context: Optional[PromptContext] = None
+    trace_id: str = ""
+    replay_nodes: Dict[str, Any] = {}
 
-    def __call__(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        if self.input_model is not None:
-            data = self.input_model(**data).dict()
-        result = self.func(data)
-        if self.output_model is not None:
-            result = self.output_model(**result).dict()
-        return result
-
-
-def register_node(
-    *,
-    name: str = "",
-    version: str = "",
-    input_model: Optional[Type[BaseModel]] = None,
-    output_model: Optional[Type[BaseModel]] = None,
-) -> Callable[
-    [Callable[[Dict[str, Any]], Dict[str, Any]]],
-    Callable[[Dict[str, Any]], Dict[str, Any]],
-]:
-    """Decorator to register a node with metadata."""
-
-    def decorator(func: Callable[[Dict[str, Any]], Dict[str, Any]]):
-        wrapper = NodeWrapper(
-            func,
-            name=name,
-            version=version,
-            input_model=input_model,
-            output_model=output_model,
-        )
-
-        def _wrapped(data: Dict[str, Any]) -> Dict[str, Any]:
-            return wrapper(data)
-
-        _wrapped.wrapper = wrapper  # type: ignore[attr-defined]
-        return _wrapped
-
-    return decorator
-
-
-class ContextInjector:
-    """Inject additional context into node input."""
-
-    def inject(
-        self, data: Dict[str, Any], context: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        merged = data.copy()
-        merged.update(context)
-        return merged
-
-
-class ReplayManager:
-    """Manage saving and loading of DAG traces."""
-
-    def __init__(self, store: str = "data/replay") -> None:
-        self.store = store
-
-    def _path(self, trace_id: str) -> str:
-        return os.path.join(self.store, f"{trace_id}.json")
-
-    def load(self, trace_id: str) -> Dict[str, Any]:
-        path = self._path(trace_id)
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-
-    def save(self, trace_id: str, data: Dict[str, Any]) -> None:
-        os.makedirs(self.store, exist_ok=True)
-        path = self._path(trace_id)
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(data, f)
+    class Config:
+        arbitrary_types_allowed = True
 
 
 class DAGFlowBuilder:
-    """Build and run a simple DAG flow."""
+    """Build and run a graph-based DAG flow."""
 
-    def __init__(self) -> None:
-        self.nodes: List[Callable[[Dict[str, Any]], Dict[str, Any]]] = []
+    def __init__(self, name: str = "default_asda_flow"):
+        self.name = name
+        self.workflow = StateGraph(DAGState)
+        self.nodes: Dict[str, Callable] = {}
 
-    def register(
-        self, node: Callable[[Dict[str, Any]], Dict[str, Any]]
-    ) -> None:
-        self.nodes.append(node)
+    def add_node(self, name: str, node: Callable):
+        """Add a node to the graph."""
+        self.workflow.add_node(name, node)
+        self.nodes[name] = node
 
-    def build_default_flow(self) -> "DAGFlowRunner":
-        return DAGFlowRunner(self.nodes)
+    def add_edge(self, start_node: str, end_node: str):
+        """Add a directed edge between two nodes."""
+        self.workflow.add_edge(start_node, end_node)
 
+    def set_entry_point(self, node_name: str):
+        """Set the entry point for the graph."""
+        self.workflow.set_entry_point(node_name)
 
-class DAGFlowRunner:
-    """Execute a series of nodes sequentially."""
+    def add_conditional_edge(
+        self,
+        start_node: str,
+        condition: Callable[[DAGState], str],
+        outcomes: Dict[str, str],
+    ):
+        """Add a conditional edge based on state."""
+        self.workflow.add_conditional_edges(start_node, condition, outcomes)
 
-    def __init__(
-        self, nodes: List[Callable[[Dict[str, Any]], Dict[str, Any]]]
-    ) -> None:
-        self.nodes = nodes
-        self.trace_id = build_trace_id()
-
-    def invoke(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
-        data = inputs
-        for node in self.nodes:
-            data = node(data)
-        return data
-
-
-# ---------------------------------------------------------------------------
-# Default mini DAG used across the project
-
-
-class RawEventIn(BaseModel):
-    raw_event: str
+    def build(self):
+        """Compile the graph into a runnable workflow."""
+        self.workflow.add_edge(list(self.nodes.keys())[-1], END)
+        return self.workflow.compile()
 
 
-class ParsedOut(BaseModel):
-    text: str
+class ContextInjector:
+    """Injects context into the DAG state."""
+
+    def __init__(self, context: PromptContext):
+        self.context = context
+
+    def inject(self, state: DAGState) -> DAGState:
+        """Injects the context into the state."""
+        state.context = self.context
+        return state
 
 
-@register_node(
-    name="parse",
-    version="1.0",
-    input_model=RawEventIn,
-    output_model=ParsedOut,
-)
-def parse_node(data: Dict[str, Any]) -> Dict[str, Any]:
-    return {"text": data["raw_event"]}
+class ReplayManager:
+    """Manages the replay of DAG traces."""
+
+    def __init__(self, replay_writer: ReplayWriter, replay_reader: ReplayReader):
+        self.replay_writer = replay_writer
+        self.replay_reader = replay_reader
+
+    def replay(self, trace_id: str, builder: DAGFlowBuilder) -> DAGState:
+        """Replays a given trace_id."""
+        trace_record = self.replay_reader.load(trace_id)
+        initial_input = trace_record.executed_nodes[0].input
+        replay_nodes = {
+            node.node_name: node.output for node in trace_record.executed_nodes
+        }
+
+        # Create a new graph for replay
+        replay_graph = builder.build()
+        state = DAGState(
+            input_data=initial_input,
+            trace_id=trace_id,
+            replay_nodes=replay_nodes,
+        )
+        return replay_graph.invoke(state)
 
 
-@register_node(
-    name="upper",
-    version="1.0",
-    input_model=ParsedOut,
-    output_model=ParsedOut,
-)
-def upper_node(data: Dict[str, Any]) -> Dict[str, Any]:
-    return {"text": data["text"].upper()}
-
-
-def build_default_dag() -> DAGFlowBuilder:
-    """Return a builder pre-populated with demo nodes."""
-    builder = DAGFlowBuilder()
-    builder.register(parse_node)
-    builder.register(upper_node)
-    return builder
-
-
+# Helper utils
 def build_trace_id() -> str:
+    """Generate a unique trace ID."""
     return str(uuid.uuid4())
 
 
-__all__ = [
-    "NodeWrapper",
-    "register_node",
-    "ContextInjector",
-    "ReplayManager",
-    "DAGFlowBuilder",
-    "DAGFlowRunner",
-    "build_trace_id",
-    "RawEventIn",
-    "ParsedOut",
-    "parse_node",
-    "upper_node",
-    "build_default_dag",
-]
+def register_node(
+    builder: DAGFlowBuilder, name: str, version: str = "v1.0", tags: List[str] = None
+):
+    """Decorator to register a function as a DAG node."""
+
+    def decorator(func: Callable[[DAGState], DAGState]):
+        @asda_node(name=name, version=version, tags=tags or [])
+        def wrapper(state: DAGState) -> DAGState:
+            # If in replay mode, use the stored output
+            if name in state.replay_nodes:
+                return state.replay_nodes[name]
+            return func(state)
+
+        builder.add_node(name, wrapper)
+        return wrapper
+
+    return decorator
