@@ -18,6 +18,7 @@ from .node_interface import (
     register_node,
     list_registered_nodes,
 )
+from .trace_logger import TraceEvent, TraceLogger, log_node_event
 
 __all__ = [
     "run",
@@ -34,4 +35,7 @@ __all__ = [
     "asda_node",
     "register_node",
     "list_registered_nodes",
+    "TraceEvent",
+    "TraceLogger",
+    "log_node_event",
 ]

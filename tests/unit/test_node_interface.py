@@ -14,7 +14,12 @@ class OutSchema(BaseOutputSchema):
     text: str
 
 
-@asda_node(name="echo", version="1.0", input_model=InSchema, output_model=OutSchema)
+@asda_node(
+    name="echo",
+    version="1.0",
+    input_model=InSchema,
+    output_model=OutSchema,
+)
 def echo_node(data: InSchema) -> OutSchema:
     return OutSchema(text=data.text.upper())
 

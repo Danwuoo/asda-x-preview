@@ -4,3 +4,4 @@ requests
 pydantic
 jinja2
 langdetect
+structlog
