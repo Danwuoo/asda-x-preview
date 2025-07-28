@@ -20,6 +20,7 @@ class DAGState(BaseModel):
     context: Optional[PromptContext] = None
     trace_id: str = ""
     replay_nodes: Dict[str, Any] = {}
+    is_replay: bool = False
 
     class Config:
         arbitrary_types_allowed = True
@@ -57,8 +58,58 @@ class DAGFlowBuilder:
 
     def build(self):
         """Compile the graph into a runnable workflow."""
-        self.workflow.add_edge(list(self.nodes.keys())[-1], END)
+        # By default, add an edge from the last added node to the end
+        if self.nodes:
+            last_node_name = list(self.nodes.keys())[-1]
+            self.workflow.add_edge(last_node_name, END)
         return self.workflow.compile()
+
+    def build_default_flow(self):
+        """Build a default DAG flow for demonstration."""
+        self.set_entry_point("start")
+        self.add_edge("start", "context_injector")
+        self.add_edge("context_injector", "processing_node")
+        self.add_edge("processing_node", "output_node")
+        return self.build()
+
+
+class NodeWrapper:
+    """A wrapper for DAG nodes to handle trace logging and validation."""
+
+    def __init__(
+        self,
+        node_func: Callable,
+        name: str,
+        version: str = "v1.0",
+        tags: List[str] = None,
+    ):
+        self.node_func = node_func
+        self.name = name
+        self.version = version
+        self.tags = tags or []
+
+    def __call__(self, state: DAGState) -> DAGState:
+        """Execute the node, with trace logging and replay handling."""
+        if state.is_replay and self.name in state.replay_nodes:
+            # In replay mode, return the stored output
+            return state.replay_nodes[self.name]
+
+        # Execute the actual node function
+        result_state = self.node_func(state)
+        return result_state
+
+
+def register_node(
+    builder: DAGFlowBuilder, name: str, version: str = "v1.0", tags: List[str] = None
+):
+    """Decorator to register a function as a DAG node."""
+
+    def decorator(func: Callable[[DAGState], DAGState]):
+        wrapped_node = NodeWrapper(func, name, version, tags)
+        builder.add_node(name, wrapped_node)
+        return func  # Return the original function
+
+    return decorator
 
 
 class ContextInjector:
@@ -67,7 +118,7 @@ class ContextInjector:
     def __init__(self, context: PromptContext):
         self.context = context
 
-    def inject(self, state: DAGState) -> DAGState:
+    def __call__(self, state: DAGState) -> DAGState:
         """Injects the context into the state."""
         state.context = self.context
         return state
@@ -82,7 +133,11 @@ class ReplayManager:
 
     def replay(self, trace_id: str, builder: DAGFlowBuilder) -> DAGState:
         """Replays a given trace_id."""
-        trace_record = self.replay_reader.load(trace_id)
+        try:
+            trace_record = self.replay_reader.load(trace_id)
+        except FileNotFoundError:
+            raise ValueError(f"Trace with ID '{trace_id}' not found.")
+
         initial_input = trace_record.executed_nodes[0].input
         replay_nodes = {
             node.node_name: node.output for node in trace_record.executed_nodes
@@ -94,6 +149,7 @@ class ReplayManager:
             input_data=initial_input,
             trace_id=trace_id,
             replay_nodes=replay_nodes,
+            is_replay=True,
         )
         return replay_graph.invoke(state)
 
@@ -104,20 +160,16 @@ def build_trace_id() -> str:
     return str(uuid.uuid4())
 
 
-def register_node(
-    builder: DAGFlowBuilder, name: str, version: str = "v1.0", tags: List[str] = None
-):
-    """Decorator to register a function as a DAG node."""
+def validate_io(node_func):
+    """A decorator to validate node input and output schemas (conceptual)."""
+    # This is a placeholder for a more complex implementation
+    # that would use pydantic models to validate the input and output
+    # of the node function.
+    def wrapper(state: DAGState) -> DAGState:
+        # Here you would add your validation logic
+        # For example, checking if the input_data matches a certain schema
+        result_state = node_func(state)
+        # And then checking the result_state
+        return result_state
 
-    def decorator(func: Callable[[DAGState], DAGState]):
-        @asda_node(name=name, version=version, tags=tags or [])
-        def wrapper(state: DAGState) -> DAGState:
-            # If in replay mode, use the stored output
-            if name in state.replay_nodes:
-                return state.replay_nodes[name]
-            return func(state)
-
-        builder.add_node(name, wrapper)
-        return wrapper
-
-    return decorator
+    return wrapper
