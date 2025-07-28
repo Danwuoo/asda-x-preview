@@ -10,7 +10,11 @@ from langgraph.graph import END, StateGraph
 
 from typing import Any, Dict, Optional
 from langchain_core.pydantic_v1 import BaseModel, Field
-from src.core.node_interface import asda_node
+from src.core.node_interface import (
+    asda_node,
+    register_node as _register_node,
+    list_registered_nodes as _list_registered_nodes,
+)
 from src.core.prompt_context import PromptContext
 from src.core.replay_trace import ReplayReader, ReplayWriter, TraceRecord
 
@@ -71,6 +75,18 @@ class DAGFlowBuilder:
 # NodeWrapper and register_node are deprecated in favor of the asda_node decorator.
 # The `asda_node` decorator now handles all tracing, validation, and metadata.
 # The DAGFlowBuilder now directly accepts the decorated node functions.
+
+# Temporary shims for backwards compatibility with older tests that
+# still import `register_node` and `list_registered_nodes` from this
+# module. These simply re-export the implementations from
+# `src.core.node_interface`.
+
+def register_node(node_function: Callable[..., Any], name: Optional[str] = None) -> None:
+    _register_node(node_function, name)
+
+
+def list_registered_nodes() -> List[str]:
+    return _list_registered_nodes()
 
 
 class ContextInjector:
