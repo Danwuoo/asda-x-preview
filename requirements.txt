@@ -1,3 +1,6 @@
 # Basic Python dependencies
 flask
 requests
+pydantic
+jinja2
+langdetect
