@@ -67,11 +67,11 @@ def asda_node(
 
         # --- Schema Extraction ---
         input_schema_type = next(
-            (p.annotation for p in sig.parameters.values() if isinstance(p.annotation, type) and issubclass(p.annotation, BaseInputSchema)),
+            (p.annotation for p in sig.parameters.values() if isinstance(p.annotation, type) and issubclass(p.annotation, BaseModel)),
             None,
         )
         if not input_schema_type:
-            raise TypeError(f"Node '{node_name}' must have an input parameter with a BaseInputSchema subclass annotation.")
+            raise TypeError(f"Node '{node_name}' must have a Pydantic BaseModel subclass annotation for its input parameter.")
 
         output_schema_type = sig.return_annotation
         if not (isinstance(output_schema_type, type) and issubclass(output_schema_type, BaseOutputSchema)):
@@ -89,10 +89,13 @@ def asda_node(
                 raise ValueError(f"Input for node '{node_name}' not found. Expected output from node '{input_node}'.")
 
             try:
-                if isinstance(raw_input_data, dict):
-                    input_schema = input_schema_type(**raw_input_data)
-                elif isinstance(raw_input_data, BaseInputSchema):
+                if isinstance(raw_input_data, input_schema_type):
                     input_schema = raw_input_data
+                elif isinstance(raw_input_data, dict):
+                    input_schema = input_schema_type(**raw_input_data)
+                elif isinstance(raw_input_data, BaseModel):
+                    # If it's a different Pydantic model, convert it via dict
+                    input_schema = input_schema_type(**raw_input_data.model_dump())
                 else: # Try to auto-assign to the first data field
                      data_field = next((f for f,v in input_schema_type.model_fields.items() if f not in BaseInputSchema.model_fields), None)
                      if data_field:
@@ -109,13 +112,15 @@ def asda_node(
                 logger=trace_logger,
                 node_name=node_name,
                 version=version,
+                trace_id_override=state.trace_id if state.trace_id else None,
                 governance_tags=tags,
                 input_hash=input_hash,
             ) as trace_event:
-                # Set trace_id on the first node
+                # Set trace_id on the first node and on the input schema if it's a BaseInputSchema
                 if state.trace_id == "":
                     state.trace_id = trace_event.trace_id
-                input_schema.trace_id = state.trace_id
+                if isinstance(input_schema, BaseInputSchema):
+                    input_schema.trace_id = state.trace_id
 
                 output_data = func(input_schema)
 

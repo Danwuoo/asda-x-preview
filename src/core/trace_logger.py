@@ -125,7 +125,7 @@ class SQLiteTraceSink:
             "INSERT INTO traces VALUES (?,?,?,?,?,?,?,?,?,?,?)",
             (
                 event.trace_id, event.span_id, event.node_name, event.version,
-                event.status.value, event.timestamp.isoformat(), event.runtime_ms,
+                event.status, event.timestamp.isoformat(), event.runtime_ms,
                 event.input_hash, event.output_hash, event.error_message, tags_str
             ),
         )
@@ -144,7 +144,7 @@ class StreamPublisherSink:
         atexit.register(self.close)
 
     def __call__(self, event: TraceEvent) -> None:
-        topic = f"/asda/{event.status.value}/{event.node_name}"
+        topic = f"/asda/{event.status}/{event.node_name}"
         message = event.model_dump_json()
         self.socket.send_multipart([topic.encode("utf-8"), message.encode("utf-8")])
 
@@ -155,7 +155,7 @@ class StreamPublisherSink:
 
 # --- Core Logger ---
 
-def _to_dict_factory(obj: Any) -> Any:
+def _to_dict_factory(obj: Any, **kwargs) -> Any:
     if isinstance(obj, BaseModel):
         return obj.model_dump(mode="json")
     if isinstance(obj, Enum):
@@ -233,6 +233,7 @@ def log_node_execution(
     logger: TraceLogger,
     node_name: str,
     version: str,
+    trace_id_override: Optional[str] = None,
     governance_tags: Optional[List[str]] = None,
     input_hash: Optional[str] = None,
 ) -> Any:
@@ -248,7 +249,7 @@ def log_node_execution(
     # Start a new span
     with tracer.start_as_current_span(node_name) as span:
         ctx = trace.get_current_span().get_span_context()
-        trace_id = f"0x{ctx.trace_id:032x}"
+        trace_id = trace_id_override or f"0x{ctx.trace_id:032x}"
         span_id = f"0x{ctx.span_id:016x}"
 
         span.set_attributes({

@@ -1,3 +1,15 @@
-# Configuration template for ASDA-X
+# Configuration for ASDA-X
+tracing:
+  # -- Sink enabled flags --
+  jsonl_enabled: true
+  sqlite_enabled: true
+  stream_enabled: false # Optional: for real-time UI
+
+  # -- Sink configurations --
+  jsonl_path: "data/trace_events.jsonl"
+  sqlite_path: "data/asda_traces.db"
+  stream_host: "127.0.0.1"
+  stream_port: 5555
+
 inference:
   provider: watsonx.ai
