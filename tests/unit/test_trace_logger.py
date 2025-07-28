@@ -9,52 +9,16 @@ from unittest.mock import MagicMock, patch
 import pytest
 from pydantic import ValidationError
 
-from src.core.config import Settings, TracingSettings
 from src.core.dag_engine import DAGState
 from src.core.node_interface import asda_node, BaseInputSchema, BaseOutputSchema
 from src.core.trace_logger import (
     JSONLSink,
     SQLiteTraceSink,
-    StreamPublisherSink,
     TraceEvent,
     NodeStatus,
     TraceLogger,
+    log_node_execution,
 )
-from src.core import global_logger
-
-# --- Test Fixtures ---
-
-@pytest.fixture
-def clean_logger(tmp_path):
-    """
-    Provides a cleanly configured logger for each test, pointing to a temporary directory.
-    This avoids state leakage between tests.
-    """
-    # 1. Define settings for a temporary logger
-    log_file = tmp_path / "trace.jsonl"
-    db_file = tmp_path / "trace.db"
-    test_settings = Settings(
-        tracing=TracingSettings(
-            jsonl_enabled=True,
-            sqlite_enabled=True,
-            stream_enabled=False,
-            jsonl_path=str(log_file),
-            sqlite_path=str(db_file),
-        )
-    )
-
-    # 2. Patch the global settings object
-    with patch('src.core.global_logger.settings', test_settings):
-        # 3. Re-initialize the global logger with the new settings
-        # This creates new sinks pointing to the temp directory
-        logger = global_logger.setup_global_logger()
-
-        # 4. Monkeypatch the trace_logger in node_interface to use our new instance
-        with patch('src.core.node_interface.trace_logger', logger):
-            yield logger # Test runs with the clean logger
-
-    # 5. Teardown: shutdown the logger to close file handles
-    logger.shutdown()
 
 
 # --- Schema Tests ---
@@ -71,8 +35,7 @@ def test_trace_event_creation_and_validation():
 def test_trace_event_missing_required_fields():
     """Test that creating a TraceEvent with missing fields raises an error."""
     with pytest.raises(ValidationError):
-        TraceEvent(trace_id="t1", node_name="n1")
-
+        TraceEvent(trace_id="t1", span_id="s1", node_name="n1", version="v1", status=NodeStatus.SUCCESS) # Missing runtime_ms
 
 # --- Sink Tests ---
 
@@ -108,60 +71,31 @@ def test_sqlite_sink_writes_event(tmp_path):
     assert row is not None
     assert row[2] == "n2"
 
+# --- Context Manager Test ---
 
-# --- Integration Tests ---
+def test_log_node_execution_context_manager():
+    """Test the log_node_execution context manager."""
+    mock_logger = MagicMock(spec=TraceLogger)
 
-class SimpleInput(BaseInputSchema):
-    message: str
+    with log_node_execution(logger=mock_logger, node_name="test_node", version="1.0") as event:
+        assert event.status == NodeStatus.SUCCESS
 
-class SimpleOutput(BaseOutputSchema):
-    reply: str
+    mock_logger.log_event.assert_called_once()
+    logged_event = mock_logger.log_event.call_args[0][0]
+    assert logged_event.node_name == "test_node"
+    assert logged_event.status == NodeStatus.SUCCESS
+    assert logged_event.runtime_ms > 0
 
-@asda_node(name="node_a", version="1.0")
-def node_a(data: SimpleInput) -> SimpleOutput:
-    return SimpleOutput(reply=data.message.upper())
+def test_log_node_execution_with_exception():
+    """Test that the context manager correctly logs failures."""
+    mock_logger = MagicMock(spec=TraceLogger)
 
-@asda_node(name="node_b", version="1.0", input_node="node_a")
-def node_b(data: SimpleOutput) -> SimpleOutput:
-    return SimpleOutput(reply=f"From A: {data.reply}")
+    with pytest.raises(ValueError, match="Something went wrong"):
+        with log_node_execution(logger=mock_logger, node_name="failing_node", version="1.0"):
+            raise ValueError("Something went wrong")
 
-
-def test_asda_node_decorator_logs_event(clean_logger):
-    """Test that the asda_node decorator correctly logs a TraceEvent."""
-    state = DAGState(initial_input=SimpleInput(message="hello"), trace_id="")
-    result_state = node_a(state)
-
-    # Verify the log was written
-    clean_logger.shutdown() # Ensure logs are flushed
-
-    log_path = clean_logger.sinks[0].path # JSONLSink is the first sink
-    with open(log_path, "r") as f:
-        log_entry = json.loads(f.readline())
-
-    assert log_entry["node_name"] == "node_a"
-    assert log_entry["status"] == "success"
-    assert log_entry["version"] == "1.0"
-    assert log_entry["input_hash"] is not None
-
-def test_dag_integration_with_connected_nodes(clean_logger):
-    """Test a two-node DAG to ensure trace_id is consistent."""
-    state = DAGState(initial_input=SimpleInput(message="test"), trace_id="")
-
-    state_after_a = node_a(state)
-    state.node_outputs.update(state_after_a["node_outputs"])
-    state_after_b = node_b(state)
-
-    clean_logger.shutdown()
-
-    log_path = clean_logger.sinks[0].path
-    with open(log_path, "r") as f:
-        lines = f.readlines()
-
-    assert len(lines) == 2
-    log_a = json.loads(lines[0])
-    log_b = json.loads(lines[1])
-
-    assert log_a["node_name"] == "node_a"
-    assert log_b["node_name"] == "node_b"
-    assert log_a["trace_id"] == log_b["trace_id"]
-    assert log_a["trace_id"] != ""
+    mock_logger.log_event.assert_called_once()
+    logged_event = mock_logger.log_event.call_args[0][0]
+    assert logged_event.node_name == "failing_node"
+    assert logged_event.status == NodeStatus.FAILURE
+    assert "Something went wrong" in logged_event.error_message

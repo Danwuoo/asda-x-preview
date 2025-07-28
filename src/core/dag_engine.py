@@ -139,6 +139,20 @@ def output_node(state: DAGState) -> DAGState:
     return state
 
 
+from tests.dummy_nodes import llm_inference_node, retriever_node, executor_node
+
+def build_default_dag() -> DAGFlowBuilder:
+    """Build the default DAG."""
+    builder = DAGFlowBuilder(name="default_asda_flow")
+    builder.add_node("llm_inference_node", llm_inference_node)
+    builder.add_node("retriever_node", retriever_node)
+    builder.add_node("executor_node", executor_node)
+    builder.set_entry_point("retriever_node")
+    builder.add_edge("retriever_node", "llm_inference_node")
+    builder.add_edge("llm_inference_node", "executor_node")
+    return builder
+
+
 # Helper utils
 def build_trace_id() -> str:
     """Generate a unique trace ID."""

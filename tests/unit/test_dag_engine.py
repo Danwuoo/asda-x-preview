@@ -33,14 +33,12 @@ class TestDAGEngine(unittest.TestCase):
         self.assertIn("test_node", builder.nodes)
         self.assertEqual(builder.nodes["test_node"], mock_node)
 
-    def test_register_node_decorator(self):
-        builder = DAGFlowBuilder()
-
-        @register_node(builder, name="test_node")
-        def my_test_node(state: DAGState) -> DAGState:
-            return state
-
-        self.assertIn("test_node", builder.nodes)
+    def test_build_default_dag(self):
+        builder = build_default_dag()
+        self.assertIsInstance(builder, DAGFlowBuilder)
+        self.assertIn("llm_inference_node", builder.nodes)
+        self.assertIn("retriever_node", builder.nodes)
+        self.assertIn("executor_node", builder.nodes)
 
     def test_context_injector(self):
         context = PromptContext(

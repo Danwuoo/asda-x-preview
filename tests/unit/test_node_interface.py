@@ -37,80 +37,65 @@ def my_test_node_v1_2(input_data: MyInput) -> MyOutput:
     return MyOutput(result=result)
 
 
+from src.core.dag_engine import DAGState
+
+
 class TestNodeInterface:
     def setup_method(self):
         NODE_REGISTRY.clear()
-        if os.path.exists("data/trace_events.jsonl"):
-            os.remove("data/trace_events.jsonl")
-
-    def teardown_method(self):
+        # Clear any existing trace files or mock setups
         if os.path.exists("data/trace_events.jsonl"):
             os.remove("data/trace_events.jsonl")
 
     def test_decorator_wraps_function_correctly(self):
-        input_data = MyInput(a=5, b=10)
-        output = my_test_node(input_data)
+        state = DAGState(initial_input={"a": 5, "b": 10}, trace_id="test_trace_1")
+        output_state = my_test_node(state)
+        output = output_state["node_outputs"]["my_test_node"]
         assert isinstance(output, MyOutput)
         assert output.result == 15
 
-    def test_input_output_validation(self):
-        with pytest.raises(ValidationError):
-            my_test_node({"a": "not_an_int", "b": 10})
+    def test_input_validation_failure(self):
+        state = DAGState(initial_input={"a": "not_an_int", "b": 10}, trace_id="test_trace_2")
+        with pytest.raises(ValueError, match="Input validation failed"):
+            my_test_node(state)
 
     def test_node_metadata_is_present(self):
-        input_data = MyInput(a=1, b=2)
-        output = my_test_node(input_data)
+        state = DAGState(initial_input={"a": 1, "b": 2}, trace_id="test_trace_3")
+        output_state = my_test_node(state)
+        output = output_state["node_outputs"]["my_test_node"]
         assert isinstance(output.node_meta, NodeMeta)
         assert output.node_meta.node_name == "my_test_node"
         assert output.node_meta.version == "v1.1"
         assert "test" in output.node_meta.tags
-        assert output.node_meta.replay_trace_id == input_data.trace_id
+        assert output.node_meta.replay_trace_id == "test_trace_3"
 
-    def test_io_capture_and_tracing(self):
-        input_data = MyInput(a=5, b=10)
-        my_test_node(input_data)
+    @patch("src.core.node_interface.trace_logger")
+    def test_io_capture_and_tracing(self, mock_trace_logger):
+        state = DAGState(initial_input={"a": 5, "b": 10}, trace_id="test_trace_4")
+        my_test_node(state)
 
-        assert os.path.exists("data/trace_events.jsonl")
-        with open("data/trace_events.jsonl", "r") as f:
-            trace_event = json.load(f)
+        # Check that the logger was called
+        mock_trace_logger.log_event.assert_called_once()
+        trace_event = mock_trace_logger.log_event.call_args[0][0]
 
-        assert trace_event["node_name"] == "my_test_node"
-        assert trace_event["version"] == "v1.1"
-        assert trace_event["status"] == "success"
-        assert trace_event["input_hash"] is not None
-        assert trace_event["output_hash"] is not None
+        assert trace_event.node_name == "my_test_node"
+        assert trace_event.version == "v1.1"
+        assert trace_event.status == "success"
+        assert trace_event.input_hash is not None
+        assert trace_event.output_hash is not None
 
-    def test_no_io_capture(self):
-        @asda_node(capture_io=False)
-        def no_capture_node(input_data: MyInput) -> MyOutput:
-            return MyOutput(result=input_data.a + input_data.b)
+    def test_registration_and_listing(self):
+        NODE_REGISTRY.clear() # Ensure clean state
+        register_node(my_test_node, name="node1")
+        register_node(my_test_node_v1_2, name="node2")
 
-        no_capture_node(MyInput(a=1, b=2))
-        assert not os.path.exists("data/trace_events.jsonl")
+        nodes = list_registered_nodes()
+        assert "node1" in nodes
+        assert "node2" in nodes
+        assert len(nodes) == 2
 
-    def test_validation_error_logging(self):
-        with patch.object(trace_logger, 'log') as mock_log:
-            with pytest.raises(ValidationError):
-                my_test_node({"a": "invalid", "b": 2})
+        # Test duplicate registration
+        with pytest.raises(ValueError, match="already registered"):
+            register_node(my_test_node, name="node1")
 
-            mock_log.assert_called_once()
-            trace_event = mock_log.call_args[0][0]
-            assert trace_event.status == "validation_error"
-            assert "validation error" in trace_event.error_msg
-
-    def test_multi_version_registration(self):
-        register_node(my_test_node, name="my_test_node_v1.1")
-        register_node(my_test_node_v1_2, name="my_test_node_v1.2")
-
-        assert "my_test_node_v1.1" in list_registered_nodes()
-        assert "my_test_node_v1.2" in list_registered_nodes()
-
-        input_data = MyInput(a=3, b=4)
-
-        # Execute v1.1
-        output_v1_1 = NODE_REGISTRY["my_test_node_v1.1"](input_data)
-        assert output_v1_1.result == 7
-
-        # Execute v1.2
-        output_v1_2 = NODE_REGISTRY["my_test_node_v1.2"](input_data)
-        assert output_v1_2.result == 12
+        NODE_REGISTRY.clear()

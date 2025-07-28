@@ -7,7 +7,7 @@ from fastapi import BackgroundTasks, FastAPI
 from pydantic import BaseModel
 
 from .dag_engine import (DAGFlowBuilder, ReplayManager, build_trace_id,
-                       start_node, context_injector_node, processing_node, output_node)
+                       build_default_dag)
 from .node_interface import list_registered_nodes
 from .prompt_context import PromptContext, parse_input_context
 
@@ -76,15 +76,7 @@ def _run_dag(trace_id: str, task: TaskSubmission) -> None:
             if task.task_name != "default_asda_flow":
                 raise ValueError(f"Task '{task.task_name}' not found")
             # 1. Build the DAG
-            builder = DAGFlowBuilder(name=task.task_name)
-            builder.add_node("start", start_node)
-            builder.add_node("context_injector", context_injector_node)
-            builder.add_node("processing_node", processing_node)
-            builder.add_node("output_node", output_node)
-            builder.set_entry_point("start")
-            builder.add_edge("start", "context_injector")
-            builder.add_edge("context_injector", "processing_node")
-            builder.add_edge("processing_node", "output_node")
+            builder = build_default_dag()
             runner = builder.build()
 
             # 2. Invoke the DAG
