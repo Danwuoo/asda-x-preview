@@ -16,11 +16,12 @@ from src.core.replay_trace import ReplayReader, ReplayWriter, TraceRecord
 class DAGState(BaseModel):
     """Represents the state of the DAG."""
 
-    input_data: Any
+    initial_input: Any
+    node_outputs: Dict[str, Any] = Field(default_factory=dict)
     context: Optional[PromptContext] = None
     trace_id: str = ""
-    replay_nodes: Dict[str, Any] = {}
     is_replay: bool = False
+    replay_data: Dict[str, Any] = Field(default_factory=dict)
 
     class Config:
         arbitrary_types_allowed = True
@@ -73,43 +74,9 @@ class DAGFlowBuilder:
         return self.build()
 
 
-class NodeWrapper:
-    """A wrapper for DAG nodes to handle trace logging and validation."""
-
-    def __init__(
-        self,
-        node_func: Callable,
-        name: str,
-        version: str = "v1.0",
-        tags: List[str] = None,
-    ):
-        self.node_func = node_func
-        self.name = name
-        self.version = version
-        self.tags = tags or []
-
-    def __call__(self, state: DAGState) -> DAGState:
-        """Execute the node, with trace logging and replay handling."""
-        if state.is_replay and self.name in state.replay_nodes:
-            # In replay mode, return the stored output
-            return state.replay_nodes[self.name]
-
-        # Execute the actual node function
-        result_state = self.node_func(state)
-        return result_state
-
-
-def register_node(
-    builder: DAGFlowBuilder, name: str, version: str = "v1.0", tags: List[str] = None
-):
-    """Decorator to register a function as a DAG node."""
-
-    def decorator(func: Callable[[DAGState], DAGState]):
-        wrapped_node = NodeWrapper(func, name, version, tags)
-        builder.add_node(name, wrapped_node)
-        return func  # Return the original function
-
-    return decorator
+# NodeWrapper and register_node are deprecated in favor of the asda_node decorator.
+# The `asda_node` decorator now handles all tracing, validation, and metadata.
+# The DAGFlowBuilder now directly accepts the decorated node functions.
 
 
 class ContextInjector:
