@@ -10,11 +10,26 @@ from langdetect import detect
 from pydantic import BaseModel, Field
 
 
-class Entity(BaseModel):
-    """Simple entity extracted from inputs."""
+class EntitySchema(BaseModel):
+    """Represents a single entity in the context."""
+    type: str = Field(description="Type of the entity (e.g., ip, domain, file_hash)")
+    value: Any = Field(description="Value of the entity")
+    description: Optional[str] = Field(None, description="Optional description of the entity")
 
-    type: str
-    value: str
+
+class EventGraphSchema(BaseModel):
+    """Represents a graph of related events or entities."""
+    nodes: List[EntitySchema] = Field(description="List of nodes (entities) in the graph")
+    edges: List[Dict[str, Any]] = Field(description="List of edges (relationships) between nodes")
+
+
+class STIXEventSchema(BaseModel):
+    """Represents data extracted from a STIX object."""
+    type: str = Field(description="STIX object type (e.g., indicator, malware, relationship)")
+    id: str = Field(description="STIX object ID")
+    description: Optional[str] = Field(None, description="Description of the STIX object")
+    pattern: Optional[str] = Field(None, description="STIX pattern for indicators")
+    valid_from: Optional[datetime] = Field(None, description="The time from which the STIX object is considered valid")
 
 
 class PromptContext(BaseModel):
@@ -23,10 +38,12 @@ class PromptContext(BaseModel):
     source_type: Literal["log", "stix", "text", "graph"]
     agent_id: str
     time: datetime
-    entities: List[Entity] = Field(default_factory=list)
+    entities: List[EntitySchema] = Field(default_factory=list)
     actions: List[str] = Field(default_factory=list)
     risk_score: Optional[float] = None
     context_summary: str = ""
+    graph: Optional[EventGraphSchema] = None
+    stix_objects: List[STIXEventSchema] = Field(default_factory=list)
 
 
 class BaseParser:
@@ -53,39 +70,80 @@ class LogParser(BaseParser):
             source_type=self.source_type,
             agent_id=data.get("agent_id", "unknown"),
             time=datetime.fromisoformat(time_str),
-            entities=[Entity(type="message", value=data.get("message", ""))],
+            entities=[EntitySchema(type="message", value=data.get("message", ""))],
             actions=data.get("actions", []),
             context_summary=data.get("message", ""),
         )
 
 
+from stix2 import parse
 class StixParser(BaseParser):
     source_type = "stix"
 
     def parse(self, data: Any) -> PromptContext:
-        if isinstance(data, str):
-            data = json.loads(data)
-        if not isinstance(data, dict) or "objects" not in data:
-            raise TypeError("StixParser expects STIX bundle dict")
+        bundle = parse(data, allow_custom=True)
+        if not hasattr(bundle, "objects"):
+            raise TypeError("StixParser expects a STIX bundle")
 
-        objects = data.get("objects", [])
-        entities = [
-            Entity(type=obj.get("type", "object"), value=obj.get("id", ""))
-            for obj in objects
-        ]
-        summary = ", ".join(obj.get("type", "") for obj in objects)
+        stix_objects = []
+        entities = []
+        for obj in bundle.objects:
+            stix_obj = STIXEventSchema(
+                type=obj.type,
+                id=obj.id,
+                description=getattr(obj, 'description', None),
+                pattern=getattr(obj, 'pattern', None),
+                valid_from=getattr(obj, 'valid_from', None),
+            )
+            stix_objects.append(stix_obj)
+            entities.append(EntitySchema(type=obj.type, value=obj.id))
+
+        summary = f"STIX bundle with {len(bundle.objects)} objects."
         return PromptContext(
             source_type=self.source_type,
-            agent_id=data.get("id", "unknown"),
+            agent_id=bundle.id,
             time=datetime.utcnow(),
             entities=entities,
-            actions=[],
+            stix_objects=stix_objects,
             context_summary=summary,
         )
 
 
+class GraphParser(BaseParser):
+    """Parse graph data into a PromptContext."""
+    source_type = "graph"
+
+    def parse(self, data: Any) -> PromptContext:
+        if not isinstance(data, dict) or "nodes" not in data or "edges" not in data:
+            raise TypeError("GraphParser expects a dict with 'nodes' and 'edges'")
+
+        graph_schema = EventGraphSchema(**data)
+        summary = f"Graph with {len(graph_schema.nodes)} nodes and {len(graph_schema.edges)} edges."
+
+        return PromptContext(
+            source_type=self.source_type,
+            agent_id="graph_parser",
+            time=datetime.utcnow(),
+            entities=graph_schema.nodes,
+            context_summary=summary,
+            graph=graph_schema,
+        )
+
+
+import spacy
+
 class FreeTextParser(BaseParser):
     source_type = "text"
+    _nlp = None
+
+    def __init__(self):
+        if FreeTextParser._nlp is None:
+            try:
+                FreeTextParser._nlp = spacy.load("en_core_web_sm")
+            except OSError:
+                # Model not found, you might need to download it:
+                # python -m spacy download en_core_web_sm
+                raise RuntimeError("Spacy 'en_core_web_sm' model not found. Please download it.")
 
     _time_regex = re.compile(r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})")
 
@@ -99,11 +157,14 @@ class FreeTextParser(BaseParser):
             time_val = datetime.utcnow()
 
         lang = detect(data)
+        doc = self._nlp(data)
+        entities = [EntitySchema(type=ent.label_, value=ent.text) for ent in doc.ents]
+
         return PromptContext(
             source_type=self.source_type,
             agent_id="unknown",
             time=time_val,
-            entities=[],
+            entities=entities,
             actions=[],
             context_summary=f"{lang}: {data}",
         )
@@ -116,6 +177,7 @@ class ContextParserFactory:
         "log": LogParser(),
         "stix": StixParser(),
         "text": FreeTextParser(),
+        "graph": GraphParser(),
     }
 
     @classmethod
@@ -127,6 +189,8 @@ class ContextParserFactory:
                     obj = json.loads(stripped)
                     if "objects" in obj:
                         return cls.parsers["stix"].parse(obj)
+                    if "nodes" in obj and "edges" in obj:
+                        return cls.parsers["graph"].parse(obj)
                     return cls.parsers["log"].parse(obj)
                 except json.JSONDecodeError:
                     pass
@@ -134,6 +198,8 @@ class ContextParserFactory:
         if isinstance(data, dict):
             if "objects" in data:
                 return cls.parsers["stix"].parse(data)
+            if "nodes" in data and "edges" in data:
+                return cls.parsers["graph"].parse(data)
             return cls.parsers["log"].parse(data)
         return cls.parsers["text"].parse(str(data))
 
@@ -143,28 +209,67 @@ def parse_input_context(data: Dict[str, Any] | str) -> PromptContext:
     return ContextParserFactory.parse(data)
 
 
+from jinja2 import Environment, FileSystemLoader
+import os
+
 class PromptComposer:
     """Render prompt text from context using templates."""
 
-    def __init__(self, template: str) -> None:
-        self.template = Template(template)
+    def __init__(self, template_dir: str = "src/core/templates") -> None:
+        self.env = Environment(loader=FileSystemLoader(template_dir))
 
-    def compose(self, context: PromptContext) -> str:
-        return self.template.render(**context.dict())
+    def list_templates(self) -> List[str]:
+        """List available templates."""
+        return self.env.list_templates()
+
+    def compose(self, template_name: str, context: PromptContext) -> str:
+        """
+        Composes a prompt using a specified template and context.
+
+        :param template_name: The name of the template file to use.
+        :param context: The PromptContext object with data for the template.
+        :return: The rendered prompt as a string.
+        """
+        template = self.env.get_template(template_name)
+        return template.render(**context.dict())
 
 
 class InjectionSanitizer:
-    """Basic prompt injection detector."""
+    """Detects and sanitizes potential prompt injection attacks."""
 
-    _pattern = re.compile(r"(\{\{|#include|---)")
+    # Expanded pattern to detect more template-like syntax and other suspicious patterns
+    _pattern = re.compile(
+        r"(\{\{.*?\}\})|"  # Jinja2-like templates
+        r"(<%.*?%>)|"  # EJS-like templates
+        r"(#include.*)|"  # C-style includes
+        r"(\b(exec|eval|system|os.system)\b)|"  # Common code execution functions
+        r"(---\s*)"  # YAML front matter
+    )
 
     def check(self, text: str) -> None:
+        """
+        Checks for suspicious patterns in the input text.
+        Raises a ValueError if a potential injection is detected.
+        """
         if self._pattern.search(text):
-            raise ValueError("Possible prompt injection detected")
+            raise ValueError("Possible prompt injection detected due to suspicious patterns.")
+
+        # Check for mixed language scripts, which can be a sign of obfuscation
+        try:
+            primary_lang = detect(text)
+            if any(c > '\u007F' for c in text):  # Check for non-ASCII characters
+                # A more sophisticated check could involve multiple language detection libraries
+                # or analyzing script blocks, but this is a simple first pass.
+                pass # For now, we'll just pass, but a warning could be logged here.
+        except Exception:
+            # Langdetect can fail on very short or ambiguous strings
+            pass
 
 
 __all__ = [
-    "Entity",
+    "EntitySchema",
+    "EventGraphSchema",
+    "STIXEventSchema",
     "PromptContext",
     "ContextParserFactory",
     "parse_input_context",

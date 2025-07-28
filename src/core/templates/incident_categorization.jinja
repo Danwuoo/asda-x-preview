@@ -1,0 +1,12 @@
+Categorize the following incident based on the provided context.
+
+**Context Summary:**
+{{ context_summary }}
+
+**Entities:**
+{% for entity in entities %}
+- {{ entity.type }}: {{ entity.value }}
+{% endfor %}
+
+**Suggested Category:**
+(e.g., Malware, Ransomware, Phishing, Lateral Movement, etc.)
