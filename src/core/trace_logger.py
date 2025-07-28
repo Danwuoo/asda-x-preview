@@ -36,7 +36,7 @@ class JSONLSink:
 
     def write(self, event: TraceEvent) -> None:
         with open(self.path, "a", encoding="utf-8") as f:
-            f.write(event.json())
+            f.write(event.model_dump_json())
             f.write("\n")
 
 
@@ -94,7 +94,7 @@ class TraceLogger:
 
     def log(self, event: TraceEvent) -> None:
         self.sink.write(event)
-        self.logger.info(event.status, **event.dict())
+        self.logger.info(event.status, **event.model_dump())
 
     def info(self, **kwargs: Any) -> None:
         event = TraceEvent(status="info", **kwargs)
