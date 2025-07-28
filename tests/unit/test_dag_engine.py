@@ -38,4 +38,3 @@ def test_dag_flow_builder():
     flow = builder.build_default_flow()
     output = flow.invoke({"text": "hi"})
     assert output == {"text": "HI"}
-

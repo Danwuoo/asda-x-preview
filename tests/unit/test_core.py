@@ -1,8 +1,11 @@
 import os
 import sys
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
 
-from src.core.agent import run
+CURRENT = os.path.dirname(__file__)
+PROJECT_ROOT = os.path.abspath(os.path.join(CURRENT, "..", ".."))
+sys.path.insert(0, PROJECT_ROOT)
+
+from src.core.agent import run  # noqa: E402
 
 
 def test_run():
