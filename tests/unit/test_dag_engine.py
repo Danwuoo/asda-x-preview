@@ -51,7 +51,7 @@ class TestDAGEngine(unittest.TestCase):
         )
         injector = ContextInjector(context)
         initial_state = DAGState(input_data={"key": "value"})
-        new_state = injector.inject(initial_state)
+        new_state = injector(initial_state)
         self.assertEqual(new_state.context, context)
 
     @patch("src.core.dag_engine.ReplayReader")

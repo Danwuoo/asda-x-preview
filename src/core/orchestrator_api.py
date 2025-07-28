@@ -20,6 +20,8 @@ class TaskSubmission(BaseModel):
 class TaskResult(BaseModel):
     trace_id: str
     status: str
+    output: Optional[Dict[str, Any]] = None
+    error: Optional[str] = None
     dag_output: Optional[Dict[str, Any]] = None
     trace_summary: Optional[str] = None
 
@@ -30,8 +32,13 @@ class NodeStatus(BaseModel):
 
 app = FastAPI()
 
+from .replay_trace import ReplayWriter, ReplayReader
+
 _tasks: Dict[str, TaskResult] = {}
-# _replay = ReplayManager()
+_replay = ReplayManager(
+    replay_writer=ReplayWriter(store="data/replays"),
+    replay_reader=ReplayReader(store="data/replays"),
+)
 
 
 # def _run_dag(trace_id: str, task: TaskSubmission) -> None:
@@ -56,6 +63,33 @@ _tasks: Dict[str, TaskResult] = {}
 #         _tasks[trace_id] = result
 
 
+def _run_dag(trace_id: str, task: TaskSubmission) -> None:
+    """Helper to run DAG in the background."""
+    try:
+        # This is a placeholder for actual DAG execution logic
+        # In a real scenario, this would involve:
+        # 1. Loading the correct DAG based on task_name
+        # 2. Executing it with the provided context
+        # 3. Storing the final result
+        _replay.replay_writer.init_trace(trace_id=trace_id, task_name=task.task_name)
+        result = _tasks[trace_id]
+        result.status = "completed"
+        result.output = {"message": "pong"}
+        _replay.replay_writer.record_node_output(
+            "__result__",
+            task.input_context,
+            result.output,
+            "1.0",
+        )
+        _tasks[trace_id] = result
+        _replay.replay_writer.finalize_trace()
+    except Exception as e:
+        result = _tasks.get(trace_id)
+        if result:
+            result.status = "failed"
+            result.error = str(e)
+
+
 @app.post("/run", response_model=TaskResult)
 def run_task(
     task: TaskSubmission,
@@ -75,12 +109,11 @@ def get_status(trace_id: str) -> TaskResult:
     )
 
 
-@app.get("/result/{trace_id}", response_model=Dict[str, Any])
-def get_result(trace_id: str) -> Dict[str, Any]:
-    try:
-        return _replay.load(trace_id)
-    except FileNotFoundError:  # pragma: no cover - no result
-        return {}
+@app.get("/result/{trace_id}", response_model=TaskResult)
+def get_result(trace_id: str) -> TaskResult:
+    return _tasks.get(
+        trace_id, TaskResult(trace_id=trace_id, status="unknown")
+    )
 
 
 @app.get("/nodes", response_model=NodeStatus)
@@ -90,8 +123,11 @@ def get_nodes() -> NodeStatus:
 
 @app.get("/replay/{trace_id}", response_model=TaskResult)
 def replay(trace_id: str, background_tasks: BackgroundTasks) -> TaskResult:
-    stored = _replay.load(trace_id)
-    submission = TaskSubmission.parse_obj(stored.get("input"))
+    stored = _replay.replay_reader.load(trace_id)
+    submission = TaskSubmission(
+        task_name=stored.task_name,
+        input_context=stored.executed_nodes[0].input,
+    )
     new_id = build_trace_id()
     result = TaskResult(trace_id=new_id, status="running")
     _tasks[new_id] = result
