@@ -8,6 +8,8 @@ from typing import Any, Callable, Dict, List, Optional, Type
 from langchain_core.pydantic_v1 import BaseModel, Field
 from langgraph.graph import END, StateGraph
 
+from typing import Any, Dict, Optional
+from langchain_core.pydantic_v1 import BaseModel, Field
 from src.core.node_interface import asda_node
 from src.core.prompt_context import PromptContext
 from src.core.replay_trace import ReplayReader, ReplayWriter, TraceRecord
@@ -65,14 +67,6 @@ class DAGFlowBuilder:
             self.workflow.add_edge(last_node_name, END)
         return self.workflow.compile()
 
-    def build_default_flow(self):
-        """Build a default DAG flow for demonstration."""
-        self.set_entry_point("start")
-        self.add_edge("start", "context_injector")
-        self.add_edge("context_injector", "processing_node")
-        self.add_edge("processing_node", "output_node")
-        return self.build()
-
 
 # NodeWrapper and register_node are deprecated in favor of the asda_node decorator.
 # The `asda_node` decorator now handles all tracing, validation, and metadata.
@@ -119,6 +113,30 @@ class ReplayManager:
             is_replay=True,
         )
         return replay_graph.invoke(state)
+
+
+def start_node(state: DAGState) -> DAGState:
+    """A starting node."""
+    state.node_outputs["start"] = "start_node_output"
+    return state
+
+
+def context_injector_node(state: DAGState) -> DAGState:
+    """A context injector node."""
+    state.node_outputs["context_injector"] = "context_injector_node_output"
+    return state
+
+
+def processing_node(state: DAGState) -> DAGState:
+    """A processing node."""
+    state.node_outputs["processing"] = "processing_node_output"
+    return state
+
+
+def output_node(state: DAGState) -> DAGState:
+    """An output node."""
+    state.node_outputs["output"] = "output_node_output"
+    return state
 
 
 # Helper utils

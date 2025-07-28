@@ -63,22 +63,25 @@ def asda_node(
     """
     def decorator(func: Callable[..., Any]) -> Callable[[Any], Dict[str, Any]]:
         node_name = name or func.__name__
-        sig = inspect.signature(func)
-
-        # --- Schema Extraction ---
-        input_schema_type = next(
-            (p.annotation for p in sig.parameters.values() if isinstance(p.annotation, type) and issubclass(p.annotation, BaseModel)),
-            None,
-        )
-        if not input_schema_type:
-            raise TypeError(f"Node '{node_name}' must have a Pydantic BaseModel subclass annotation for its input parameter.")
-
-        output_schema_type = sig.return_annotation
-        if not (isinstance(output_schema_type, type) and issubclass(output_schema_type, BaseOutputSchema)):
-            raise TypeError(f"Node '{node_name}' must have a return type annotation that is a BaseOutputSchema subclass.")
 
         @wraps(func)
         def wrapper(state: Any) -> Dict[str, Any]:
+            print(f"[asda_node] Called {func.__name__} with state: {state}")
+            sig = inspect.signature(func)
+
+            # --- Schema Extraction ---
+            input_schema_type = next(
+                (p.annotation for p in sig.parameters.values() if isinstance(p.annotation, type) and issubclass(p.annotation, BaseInputSchema)),
+                None,
+            )
+            if not input_schema_type:
+                print(f"[asda_node] Error: No input schema found for {func.__name__}")
+                raise TypeError(f"Node '{node_name}' must have a Pydantic BaseModel subclass annotation for its input parameter.")
+
+            output_schema_type = sig.return_annotation
+            if not (isinstance(output_schema_type, type) and issubclass(output_schema_type, BaseOutputSchema)):
+                print(f"[asda_node] Error: No output schema found for {func.__name__}")
+                raise TypeError(f"Node '{node_name}' must have a return type annotation that is a BaseOutputSchema subclass.")
             # --- Replay Logic ---
             if state.is_replay and node_name in state.replay_data:
                 return {"node_outputs": {**state.node_outputs, node_name: state.replay_data[node_name]}}
