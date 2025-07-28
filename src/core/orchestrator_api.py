@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import concurrent.futures
 from typing import Any, Dict, Optional
 
 from fastapi import BackgroundTasks, FastAPI
 from pydantic import BaseModel
 
-from .dag_engine import ReplayManager, build_trace_id
+from .dag_engine import (DAGFlowBuilder, ReplayManager, build_trace_id,
+                       start_node, context_injector_node, processing_node, output_node)
 from .node_interface import list_registered_nodes
-from .prompt_context import parse_input_context
+from .prompt_context import PromptContext, parse_input_context
 
 
 class TaskSubmission(BaseModel):
@@ -31,6 +33,7 @@ class NodeStatus(BaseModel):
 
 
 app = FastAPI()
+executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
 
 from .replay_trace import ReplayWriter, ReplayReader
 
@@ -65,40 +68,56 @@ _replay = ReplayManager(
 
 def _run_dag(trace_id: str, task: TaskSubmission) -> None:
     """Helper to run DAG in the background."""
+    result = TaskResult(trace_id=trace_id, status="running")
+    _tasks[trace_id] = result
     try:
-        # This is a placeholder for actual DAG execution logic
-        # In a real scenario, this would involve:
-        # 1. Loading the correct DAG based on task_name
-        # 2. Executing it with the provided context
-        # 3. Storing the final result
         _replay.replay_writer.init_trace(trace_id=trace_id, task_name=task.task_name)
-        result = _tasks[trace_id]
-        result.status = "completed"
-        result.output = {"message": "pong"}
-        _replay.replay_writer.record_node_output(
-            "__result__",
-            task.input_context,
-            result.output,
-            "1.0",
-        )
+        try:
+            if task.task_name != "default_asda_flow":
+                raise ValueError(f"Task '{task.task_name}' not found")
+            # 1. Build the DAG
+            builder = DAGFlowBuilder(name=task.task_name)
+            builder.add_node("start", start_node)
+            builder.add_node("context_injector", context_injector_node)
+            builder.add_node("processing_node", processing_node)
+            builder.add_node("output_node", output_node)
+            builder.set_entry_point("start")
+            builder.add_edge("start", "context_injector")
+            builder.add_edge("context_injector", "processing_node")
+            builder.add_edge("processing_node", "output_node")
+            runner = builder.build()
+
+            # 2. Invoke the DAG
+            output = runner.invoke(
+                {"initial_input": task.input_context, "trace_id": trace_id}
+            )
+
+            # 3. Finalize the trace and update the result
+            result.status = "completed"
+            result.dag_output = output
+            _replay.replay_writer.record_node_output(
+                "__result__",
+                task.input_context,
+                result.dag_output,
+                "1.0",
+            )
+        finally:
+            _replay.replay_writer.finalize_trace()
+    except Exception as exc:
+        result.status = "failed"
+        result.error = str(exc)
+    finally:
         _tasks[trace_id] = result
-        _replay.replay_writer.finalize_trace()
-    except Exception as e:
-        result = _tasks.get(trace_id)
-        if result:
-            result.status = "failed"
-            result.error = str(e)
 
 
 @app.post("/run", response_model=TaskResult)
 def run_task(
     task: TaskSubmission,
-    background_tasks: BackgroundTasks,
 ) -> TaskResult:
     trace_id = build_trace_id()
     result = TaskResult(trace_id=trace_id, status="running")
     _tasks[trace_id] = result
-    background_tasks.add_task(_run_dag, trace_id, task)
+    executor.submit(_run_dag, trace_id, task)
     return result
 
 
