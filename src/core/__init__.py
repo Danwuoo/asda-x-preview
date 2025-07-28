@@ -19,6 +19,14 @@ from .node_interface import (
     list_registered_nodes,
 )
 from .trace_logger import TraceEvent, TraceLogger, log_node_event
+from .replay_trace import (
+    NodeExecutionTrace,
+    ReplayMetadata,
+    TraceRecord,
+    ReplayWriter,
+    ReplayReader,
+    DAGReplayer,
+)
 
 __all__ = [
     "run",
@@ -38,4 +46,10 @@ __all__ = [
     "TraceEvent",
     "TraceLogger",
     "log_node_event",
+    "NodeExecutionTrace",
+    "ReplayMetadata",
+    "TraceRecord",
+    "ReplayWriter",
+    "ReplayReader",
+    "DAGReplayer",
 ]
