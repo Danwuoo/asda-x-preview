@@ -8,7 +8,15 @@ from .dag_engine import (
     ContextInjector,
     ReplayManager,
     build_trace_id,
+)
+from .node_interface import (
+    NodeMeta,
+    BaseInputSchema,
+    BaseOutputSchema,
+    NodeExecutionContext,
+    asda_node,
     register_node,
+    list_registered_nodes,
 )
 
 __all__ = [
@@ -19,5 +27,11 @@ __all__ = [
     "ContextInjector",
     "ReplayManager",
     "build_trace_id",
+    "NodeMeta",
+    "BaseInputSchema",
+    "BaseOutputSchema",
+    "NodeExecutionContext",
+    "asda_node",
     "register_node",
+    "list_registered_nodes",
 ]
