@@ -7,6 +7,7 @@ from src.core.prompt_context import (
     InjectionSanitizer,
     PromptComposer,
     PromptContext,
+    parse_input_context,
 )
 
 
@@ -35,3 +36,10 @@ def test_prompt_composer():
     composer = PromptComposer("Agent {{agent_id}} says {{context_summary}}")
     out = composer.compose(ctx)
     assert "Agent a" in out
+
+
+def test_parse_input_context():
+    data = {"agent_id": "a1", "message": "hello"}
+    ctx = parse_input_context(data)
+    assert ctx.agent_id == "a1"
+    assert "hello" in ctx.context_summary

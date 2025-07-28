@@ -130,6 +130,46 @@ class DAGFlowRunner:
         return data
 
 
+# ---------------------------------------------------------------------------
+# Default mini DAG used across the project
+
+
+class RawEventIn(BaseModel):
+    raw_event: str
+
+
+class ParsedOut(BaseModel):
+    text: str
+
+
+@register_node(
+    name="parse",
+    version="1.0",
+    input_model=RawEventIn,
+    output_model=ParsedOut,
+)
+def parse_node(data: Dict[str, Any]) -> Dict[str, Any]:
+    return {"text": data["raw_event"]}
+
+
+@register_node(
+    name="upper",
+    version="1.0",
+    input_model=ParsedOut,
+    output_model=ParsedOut,
+)
+def upper_node(data: Dict[str, Any]) -> Dict[str, Any]:
+    return {"text": data["text"].upper()}
+
+
+def build_default_dag() -> DAGFlowBuilder:
+    """Return a builder pre-populated with demo nodes."""
+    builder = DAGFlowBuilder()
+    builder.register(parse_node)
+    builder.register(upper_node)
+    return builder
+
+
 def build_trace_id() -> str:
     return str(uuid.uuid4())
 
@@ -142,4 +182,9 @@ __all__ = [
     "DAGFlowBuilder",
     "DAGFlowRunner",
     "build_trace_id",
+    "RawEventIn",
+    "ParsedOut",
+    "parse_node",
+    "upper_node",
+    "build_default_dag",
 ]

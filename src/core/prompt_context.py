@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 from datetime import datetime
-from typing import Any, List, Optional, Literal
+from typing import Any, List, Optional, Literal, Dict
 
 from jinja2 import Template
 from langdetect import detect
@@ -138,6 +138,11 @@ class ContextParserFactory:
         return cls.parsers["text"].parse(str(data))
 
 
+def parse_input_context(data: Dict[str, Any] | str) -> PromptContext:
+    """Public helper to normalize incoming context payloads."""
+    return ContextParserFactory.parse(data)
+
+
 class PromptComposer:
     """Render prompt text from context using templates."""
 
@@ -162,6 +167,7 @@ __all__ = [
     "Entity",
     "PromptContext",
     "ContextParserFactory",
+    "parse_input_context",
     "PromptComposer",
     "InjectionSanitizer",
 ]

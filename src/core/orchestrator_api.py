@@ -5,13 +5,9 @@ from typing import Any, Dict, Optional
 from fastapi import BackgroundTasks, FastAPI
 from pydantic import BaseModel
 
-from .dag_engine import DAGFlowBuilder, ReplayManager, build_trace_id
-from .node_interface import (
-    BaseInputSchema,
-    BaseOutputSchema,
-    asda_node,
-    list_registered_nodes,
-)
+from .dag_engine import ReplayManager, build_default_dag, build_trace_id
+from .node_interface import list_registered_nodes, replay_writer
+from .prompt_context import parse_input_context
 
 
 class TaskSubmission(BaseModel):
@@ -38,54 +34,18 @@ _tasks: Dict[str, TaskResult] = {}
 _replay = ReplayManager()
 
 
-class RawEventIn(BaseInputSchema):
-    raw_event: str
-
-
-class ParsedOut(BaseOutputSchema):
-    text: str
-
-
-@asda_node(
-    name="parse",
-    version="1.0",
-    input_model=RawEventIn,
-    output_model=ParsedOut,
-)
-def parse_node(data: RawEventIn) -> ParsedOut:
-    return ParsedOut(text=data.raw_event)
-
-
-class UpperOut(BaseOutputSchema):
-    text: str
-
-
-@asda_node(
-    name="upper",
-    version="1.0",
-    input_model=ParsedOut,
-    output_model=UpperOut,
-)
-def upper_node(data: ParsedOut) -> UpperOut:
-    return UpperOut(text=data.text.upper())
-
-
-def build_default_dag() -> DAGFlowBuilder:
-    builder = DAGFlowBuilder()
-    builder.register(parse_node)
-    builder.register(upper_node)
-    return builder
-
-
 def _run_dag(trace_id: str, task: TaskSubmission) -> None:
     result = TaskResult(trace_id=trace_id, status="running")
     _tasks[trace_id] = result
     try:
         builder = build_default_dag()
         runner = builder.build_default_flow()
+        replay_writer.init_trace(trace_id=trace_id, task_name=task.task_name)
+        ctx = parse_input_context(task.input_context)
         output = runner.invoke(
-            {"raw_event": task.input_context.get("raw_event", "")}
+            {"raw_event": ctx.context_summary, "trace_id": trace_id}
         )
+        replay_writer.finalize_trace()
         result.status = "completed"
         result.dag_output = output
         _replay.save(trace_id, {"input": task.dict(), "output": output})

@@ -9,6 +9,9 @@ from typing import Any, Callable, Dict, Generic, List, Optional, Type, TypeVar
 
 from pydantic import BaseModel, Field
 
+from .trace_logger import JSONLSink, TraceLogger, log_node_event
+from .replay_trace import ReplayWriter
+
 
 class NodeMeta(BaseModel):
     """Metadata for a DAG node."""
@@ -61,6 +64,10 @@ class NodeExecutionContext(Generic[InT, OutT]):
 # Node registry for optional lookup
 _NODE_REGISTRY: Dict[str, Callable[..., Any]] = {}
 
+# Default observability utilities used by nodes
+default_logger = TraceLogger(JSONLSink("data/trace_events.jsonl"))
+replay_writer = ReplayWriter()
+
 
 def register_node(name: str, func: Callable[..., Any]) -> None:
     """Register node by name."""
@@ -90,7 +97,6 @@ def asda_node(
         def wrapper(data: InT) -> OutT:
             ctx = NodeExecutionContext(trace_id=data.trace_id)
             meta = ctx.build_meta(node_name, version, tags)
-            # inject timestamp and trace id
             if isinstance(data, BaseModel):
                 payload = data.copy(
                     update={
@@ -102,7 +108,8 @@ def asda_node(
                 payload = data
             if input_model is not None:
                 payload = input_model.parse_obj(payload)
-            result = func(payload)  # type: ignore[arg-type]
+            with log_node_event(default_logger, node_name, version) as _:
+                result = func(payload)  # type: ignore[arg-type]
             if output_model is not None:
                 result = output_model.parse_obj(result)
             if capture_io and isinstance(result, BaseModel):
@@ -112,6 +119,14 @@ def asda_node(
                         "timestamp": meta.timestamp,
                     }
                 )
+            if getattr(replay_writer, "_current", None) is None:
+                replay_writer.init_trace()
+            replay_writer.record_node_output(
+                node_name,
+                payload.dict() if isinstance(payload, BaseModel) else payload,
+                result.dict() if isinstance(result, BaseModel) else result,
+                version,
+            )
             register_node(node_name, wrapper)
             return result  # type: ignore[return-value]
 
@@ -128,4 +143,6 @@ __all__ = [
     "asda_node",
     "register_node",
     "list_registered_nodes",
+    "default_logger",
+    "replay_writer",
 ]
