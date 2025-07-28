@@ -1,0 +1,43 @@
+# Threat Report
+
+**Agent ID:** {{ agent_id }}
+**Time:** {{ time }}
+**Source Type:** {{ source_type }}
+**Risk Score:** {{ risk_score | default('N/A') }}
+
+## Summary
+{{ context_summary }}
+
+## Entities
+{% for entity in entities %}
+- **Type:** {{ entity.type }}
+  **Value:** {{ entity.value }}
+{% endfor %}
+
+## Actions
+{% for action in actions %}
+- {{ action }}
+{% endfor %}
+
+## STIX Objects
+{% for stix_obj in stix_objects %}
+- **Type:** {{ stix_obj.type }}
+  **ID:** {{ stix_obj.id }}
+  **Description:** {{ stix_obj.description | default('N/A') }}
+  **Pattern:** {{ stix_obj.pattern | default('N/A') }}
+{% endfor %}
+
+## Graph
+{% if graph %}
+### Nodes
+{% for node in graph.nodes %}
+- **Type:** {{ node.type }}
+  **Value:** {{ node.value }}
+{% endfor %}
+### Edges
+{% for edge in graph.edges %}
+- **Source:** {{ edge.source }}
+  **Target:** {{ edge.target }}
+  **Relationship:** {{ edge.relationship }}
+{% endfor %}
+{% endif %}
