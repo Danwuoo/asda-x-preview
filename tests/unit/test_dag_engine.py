@@ -15,6 +15,7 @@ from src.core.dag_engine import (
     register_node,
     ContextInjector,
     ReplayManager,
+    build_default_dag,
 )
 from src.core.prompt_context import PromptContext
 from src.core.replay_trace import ReplayWriter, ReplayReader, TraceRecord, NodeExecutionTrace

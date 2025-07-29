@@ -3,7 +3,7 @@ from __future__ import annotations
 import concurrent.futures
 from typing import Any, Dict, Optional
 
-from fastapi import BackgroundTasks, FastAPI
+from fastapi import BackgroundTasks, FastAPI, HTTPException
 from pydantic import BaseModel
 
 from .dag_engine import (DAGFlowBuilder, ReplayManager, build_trace_id,
@@ -86,7 +86,10 @@ def _run_dag(trace_id: str, task: TaskSubmission) -> None:
 
             # 3. Finalize the trace and update the result
             result.status = "completed"
-            result.dag_output = output
+            if isinstance(output, dict) and "node_outputs" in output:
+                result.dag_output = {"node_outputs": output["node_outputs"]}
+            else:
+                result.dag_output = output
             _replay.replay_writer.record_node_output(
                 "__result__",
                 task.input_context,
@@ -135,6 +138,8 @@ def get_nodes() -> NodeStatus:
 @app.get("/replay/{trace_id}", response_model=TaskResult)
 def replay(trace_id: str, background_tasks: BackgroundTasks) -> TaskResult:
     stored = _replay.replay_reader.load(trace_id)
+    if not stored.executed_nodes:
+        raise HTTPException(status_code=400, detail="No executed nodes to replay")
     submission = TaskSubmission(
         task_name=stored.task_name,
         input_context=stored.executed_nodes[0].input,

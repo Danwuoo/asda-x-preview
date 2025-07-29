@@ -14,6 +14,7 @@ from src.core.node_interface import (
     NODE_REGISTRY,
     trace_logger,
 )
+from src.core.trace_logger import JSONLSink
 
 # Test Schemas
 class MyInput(BaseInputSchema):
@@ -41,11 +42,16 @@ from src.core.dag_engine import DAGState
 
 
 class TestNodeInterface:
-    def setup_method(self):
+    @pytest.fixture(autouse=True)
+    def _isolate_trace_file(self, tmp_path):
+        """Use a temporary trace file to avoid file handle issues."""
         NODE_REGISTRY.clear()
-        # Clear any existing trace files or mock setups
-        if os.path.exists("data/trace_events.jsonl"):
-            os.remove("data/trace_events.jsonl")
+        for sink in trace_logger.sinks:
+            sink.close()
+        trace_logger.sinks = [JSONLSink(str(tmp_path / "trace.jsonl"))]
+        yield
+        for sink in trace_logger.sinks:
+            sink.close()
 
     def test_decorator_wraps_function_correctly(self):
         state = DAGState(initial_input={"a": 5, "b": 10}, trace_id="test_trace_1")
