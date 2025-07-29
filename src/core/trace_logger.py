@@ -21,7 +21,7 @@ from opentelemetry.sdk.trace.export import (
     BatchSpanProcessor,
     ConsoleSpanExporter,
 )
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 # --- OpenTelemetry Setup ---
@@ -71,8 +71,7 @@ class TraceEvent(BaseModel):
         default_factory=list, description="Tags for governance, risk, and compliance."
     )
 
-    class Config:
-        use_enum_values = True
+    model_config = ConfigDict(use_enum_values=True)
 
 
 # --- Log Sinks ---

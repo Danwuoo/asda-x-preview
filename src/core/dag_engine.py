@@ -6,7 +6,7 @@ import uuid
 from typing import Any, Callable, Dict, List, Optional, Type
 
 from langgraph.graph import END, StateGraph
-from langchain_core.pydantic_v1 import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from src.core.node_interface import (
     asda_node,
     register_node as _register_node,
@@ -19,15 +19,14 @@ from src.core.replay_trace import ReplayReader, ReplayWriter, TraceRecord
 class DAGState(BaseModel):
     """Represents the state of the DAG."""
 
-    initial_input: Any
+    initial_input: Any = Field(default_factory=dict, alias="input_data")
     node_outputs: Dict[str, Any] = Field(default_factory=dict)
     context: Optional[PromptContext] = None
     trace_id: str = ""
     is_replay: bool = False
     replay_data: Dict[str, Any] = Field(default_factory=dict)
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True, populate_by_name=True)
 
 
 class DAGFlowBuilder:
