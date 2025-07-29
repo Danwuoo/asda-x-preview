@@ -46,6 +46,9 @@ def _patch_loggers(monkeypatch):
     dummy = DummyLogger()
     monkeypatch.setattr(gl, "trace_logger", dummy)
     monkeypatch.setattr(tl, "log_node_execution", log_node_execution)
+    import src.inference.llm_agent as llm_agent_mod
+    monkeypatch.setattr(llm_agent_mod, "trace_logger", dummy)
+    monkeypatch.setattr(llm_agent_mod, "log_node_execution", log_node_execution)
     yield
 
 
