@@ -5,10 +5,7 @@ import os
 import uuid
 from typing import Any, Callable, Dict, List, Optional, Type
 
-from langchain_core.pydantic_v1 import BaseModel, Field
 from langgraph.graph import END, StateGraph
-
-from typing import Any, Dict, Optional
 from langchain_core.pydantic_v1 import BaseModel, Field
 from src.core.node_interface import (
     asda_node,
@@ -108,7 +105,7 @@ class ReplayManager:
         self.replay_writer = replay_writer
         self.replay_reader = replay_reader
 
-    def replay(self, trace_id: str, builder: DAGFlowBuilder) -> DAGState:
+    def replay(self, trace_id: str, builder: DAGFlowBuilder) -> Dict[str, Any]:
         """Replays a given trace_id."""
         try:
             trace_record = self.replay_reader.load(trace_id)
@@ -128,7 +125,8 @@ class ReplayManager:
             replay_nodes=replay_nodes,
             is_replay=True,
         )
-        return replay_graph.invoke(state)
+        result_state = replay_graph.invoke(state)
+        return {"replay_nodes": replay_nodes, "meta": result_state}
 
 
 def start_node(state: DAGState) -> DAGState:
@@ -155,14 +153,32 @@ def output_node(state: DAGState) -> DAGState:
     return state
 
 
-from tests.dummy_nodes import llm_inference_node, retriever_node, executor_node
+
+def _retriever_node(state: DAGState) -> DAGState:
+    query = state.initial_input.get("query", "")
+    state.node_outputs["retriever_node"] = {"documents": [f"Document for: {query}"]}
+    state.initial_input = {"prompt": query}
+    return state
+
+
+def _llm_inference_node(state: DAGState) -> DAGState:
+    prompt = state.initial_input.get("prompt", "")
+    state.node_outputs["llm_inference_node"] = {"response": f"Response to: {prompt}"}
+    state.initial_input = {"action": prompt}
+    return state
+
+
+def _executor_node(state: DAGState) -> DAGState:
+    action = state.initial_input.get("action", "")
+    state.node_outputs["executor_node"] = {"result": f"Executed: {action}"}
+    return state
 
 def build_default_dag() -> DAGFlowBuilder:
     """Build the default DAG."""
     builder = DAGFlowBuilder(name="default_asda_flow")
-    builder.add_node("llm_inference_node", llm_inference_node)
-    builder.add_node("retriever_node", retriever_node)
-    builder.add_node("executor_node", executor_node)
+    builder.add_node("retriever_node", _retriever_node)
+    builder.add_node("llm_inference_node", _llm_inference_node)
+    builder.add_node("executor_node", _executor_node)
     builder.set_entry_point("retriever_node")
     builder.add_edge("retriever_node", "llm_inference_node")
     builder.add_edge("llm_inference_node", "executor_node")
