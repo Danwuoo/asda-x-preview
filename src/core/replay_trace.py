@@ -71,6 +71,21 @@ class ReplayWriter:
             self._db = TinyDB(os.path.join(self.store, "replay.json"))
         self._current: Optional[TraceRecord] = None
 
+    def close(self) -> None:
+        """Close any underlying storage handles."""
+        if self._db is not None:
+            self._db.close()
+            self._db = None
+        if self._conn is not None:
+            self._conn.close()
+            self._conn = None
+
+    def __enter__(self) -> "ReplayWriter":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.close()
+
     def _ensure_table(self) -> None:
         assert self._conn is not None
         self._conn.execute(
@@ -155,6 +170,21 @@ class ReplayReader:
                 self._conn = sqlite3.connect(path)
         else:
             self._db = TinyDB(os.path.join(self.store, "replay.json"))
+
+    def close(self) -> None:
+        """Close any underlying storage handles."""
+        if self._db is not None:
+            self._db.close()
+            self._db = None
+        if self._conn is not None:
+            self._conn.close()
+            self._conn = None
+
+    def __enter__(self) -> "ReplayReader":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.close()
 
     def load(self, trace_id: str) -> TraceRecord:
         """Load trace from storage."""
