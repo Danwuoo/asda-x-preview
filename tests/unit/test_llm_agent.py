@@ -9,15 +9,18 @@ import types  # noqa: E402
 from contextlib import contextmanager  # noqa: E402
 
 # Stub logger and trace modules to avoid heavy dependencies
-logger_module = types.ModuleType("src.core.global_logger")
+from src.core import global_logger as gl  # noqa: E402
+from src.core import trace_logger as tl  # noqa: E402
+
+
 class DummyLogger:
     def __init__(self) -> None:
         self.events = []
+
     def log_event(self, event) -> None:
         self.events.append(event)
-logger_module.trace_logger = DummyLogger()
 
-trace_module = types.ModuleType("src.core.trace_logger")
+
 @contextmanager
 def log_node_execution(logger, node_name, version, governance_tags=None, input_hash=None):
     event = types.SimpleNamespace(node_name=node_name, version=version, output_hash=None)
@@ -25,14 +28,22 @@ def log_node_execution(logger, node_name, version, governance_tags=None, input_h
         yield event
     finally:
         logger.log_event(event)
-trace_module.log_node_execution = log_node_execution
-
-sys.modules["src.core.global_logger"] = logger_module
-sys.modules["src.core.trace_logger"] = trace_module
 
 import pytest  # noqa: E402
 import pytest_httpx  # noqa: E402
 
+
+@pytest.fixture(autouse=True)
+def _patch_loggers(monkeypatch):
+    dummy = DummyLogger()
+    monkeypatch.setattr(gl, "trace_logger", dummy)
+    monkeypatch.setattr(tl, "log_node_execution", log_node_execution)
+    monkeypatch.setattr(llm_agent_mod, "trace_logger", dummy)
+    monkeypatch.setattr(llm_agent_mod, "log_node_execution", log_node_execution)
+    monkeypatch.setattr(sys.modules[__name__], "trace_logger", dummy)
+    yield
+
+from src.inference import llm_agent as llm_agent_mod  # noqa: E402
 from src.inference.llm_agent import (  # noqa: E402
     LLMAgent,
     LLMModelRegistry,
