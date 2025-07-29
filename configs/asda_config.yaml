@@ -13,3 +13,9 @@ tracing:
 
 inference:
   provider: watsonx.ai
+  models:
+    - model_id: local-test
+      provider: openllm
+      endpoint: http://localhost:3000/generate
+      tags: [test]
+      default: true

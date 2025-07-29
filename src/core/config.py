@@ -8,7 +8,7 @@ imported and used throughout the application.
 
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List, Dict, Any
 
 import yaml
 from pydantic import BaseModel, Field, ValidationError
@@ -28,6 +28,7 @@ class TracingSettings(BaseModel):
 class InferenceSettings(BaseModel):
     """Configuration for AI model inference."""
     provider: str = "watsonx.ai"
+    models: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 from pydantic import ConfigDict
