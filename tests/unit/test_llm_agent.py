@@ -119,7 +119,6 @@ async def test_model_selection(httpx_mock: HTTPXMock) -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.asyncio
 async def test_streaming_mode(httpx_mock: HTTPXMock) -> None:
     def gen():
         yield b"hello "
