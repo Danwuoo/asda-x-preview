@@ -1,0 +1,18 @@
+{
+  "name": "echo-task",
+  "actions": [
+    {
+      "name": "echo",
+      "ref": "sys.echo",
+      "parameters": {
+        "type": "echo",
+        "msg": "hi"
+      }
+    }
+  ],
+  "metadata": {
+    "generated_by": "asda-x-agent",
+    "version": "bd3cfda911d0429490cf1b8c50177da6",
+    "checksum": "656c06264f112aea1380826d02648b67eccc008bbc27630162c4acd809f50e95"
+  }
+}

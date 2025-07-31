@@ -1,0 +1,22 @@
+{
+  "decision_id": "v43759381-b1d00bc6",
+  "action_plan": {
+    "name": "echo-task",
+    "actions": [
+      {
+        "name": "echo",
+        "ref": "sys.echo"
+      }
+    ],
+    "parameters": {
+      "type": "echo",
+      "msg": "hi"
+    }
+  },
+  "risk_level": "low",
+  "dispatch_route": "AUTO",
+  "executed": true,
+  "rationale": "",
+  "trace_id": "tid1",
+  "timestamp": "2025-07-31T08:40:14.385352"
+}
