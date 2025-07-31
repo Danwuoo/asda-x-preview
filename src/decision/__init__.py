@@ -21,6 +21,14 @@ from .soar import (
     OutputValidator,
     VersionTagger,
 )
+from .versioning import (
+    VersionedActionAudit,
+    VersionIDGenerator,
+    ActionTraceLogger,
+    DecisionDiffer,
+    AuditStoreManager,
+    ASGAInterface,
+)
 
 __all__ = [
     "ExecutionContext",
@@ -41,4 +49,10 @@ __all__ = [
     "ActionParameterMapper",
     "OutputValidator",
     "VersionTagger",
+    "VersionedActionAudit",
+    "VersionIDGenerator",
+    "ActionTraceLogger",
+    "DecisionDiffer",
+    "AuditStoreManager",
+    "ASGAInterface",
 ]
