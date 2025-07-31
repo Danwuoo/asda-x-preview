@@ -1,0 +1,5 @@
+- trace_id
+- version_id
+- decision_summary
+- risk_level
+- semantic_drift_score
