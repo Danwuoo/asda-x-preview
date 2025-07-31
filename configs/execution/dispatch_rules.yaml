@@ -1,0 +1,6 @@
+low:
+  default: auto
+medium:
+  default: hitl
+high:
+  default: block
