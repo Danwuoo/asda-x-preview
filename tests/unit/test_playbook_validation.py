@@ -6,7 +6,10 @@ PROJECT_ROOT = os.path.abspath(os.path.join(CURRENT, "..", ".."))
 sys.path.insert(0, PROJECT_ROOT)
 
 import pytest  # noqa: E402
-from jsonschema import ValidationError  # noqa: E402
+try:
+    from jsonschema import ValidationError  # noqa: E402
+except Exception:  # pragma: no cover - optional dependency
+    pytest.skip("jsonschema not installed", allow_module_level=True)
 from src.decision.soar import OutputValidator  # noqa: E402
 
 

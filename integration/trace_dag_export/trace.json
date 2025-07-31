@@ -1,0 +1,27 @@
+{
+  "directed": true,
+  "multigraph": false,
+  "graph": {},
+  "nodes": [
+    {
+      "version_id": "v43759381-b1d00bc6",
+      "parent_version": null,
+      "action_plan": {
+        "name": "echo-task",
+        "actions": [
+          {
+            "name": "echo",
+            "ref": "sys.echo"
+          }
+        ],
+        "parameters": {
+          "type": "echo",
+          "msg": "hi"
+        }
+      },
+      "diff_from_parent": {},
+      "id": "v43759381-b1d00bc6"
+    }
+  ],
+  "links": []
+}

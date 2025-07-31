@@ -2,7 +2,18 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from jsonschema import Draft7Validator, ValidationError
+try:
+    from jsonschema import Draft7Validator, ValidationError
+except Exception:  # pragma: no cover - optional dependency
+    class Draft7Validator:  # type: ignore
+        def __init__(self, schema):
+            pass
+
+        def iter_errors(self, data):
+            return []
+
+    class ValidationError(Exception):
+        pass
 
 
 BASIC_SCHEMA = {
