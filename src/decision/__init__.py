@@ -14,6 +14,13 @@ from .cit import (
     ConsistencyReporter,
     RiskTriggerRouter,
 )
+from .soar import (
+    SOARGenerator,
+    PlaybookBuilder,
+    ActionParameterMapper,
+    OutputValidator,
+    VersionTagger,
+)
 
 __all__ = [
     "ExecutionContext",
@@ -29,4 +36,9 @@ __all__ = [
     "SemanticDriftEvaluator",
     "ConsistencyReporter",
     "RiskTriggerRouter",
+    "SOARGenerator",
+    "PlaybookBuilder",
+    "ActionParameterMapper",
+    "OutputValidator",
+    "VersionTagger",
 ]
