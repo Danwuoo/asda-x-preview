@@ -1,0 +1,4 @@
+synonyms:
+  block: [restrict, prevent]
+  outbound: [outgoing]
+  traffic: [connections]

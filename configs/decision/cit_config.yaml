@@ -1,0 +1,3 @@
+embedding_threshold: 0.3
+max_variants: 2
+log_path: data/replay/cit_decision.jsonl
