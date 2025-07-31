@@ -1,0 +1,12 @@
+name: {{ name }}
+actions:
+{% for action in actions %}
+  - name: {{ action.name }}
+    ref: {{ action.ref }}
+    parameters:
+{% for key, val in parameters.items() %}
+      {{ key }}: {{ val }}
+{% endfor %}
+{% endfor %}
+metadata:
+  generated_by: asda-x-agent
