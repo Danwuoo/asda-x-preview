@@ -13,6 +13,7 @@ from .sec import (
     replay_to_sec,
     render_template,
 )
+from .continual import EWC, TaskRegistry, train_task
 
 __all__ = [
     "ReplayEntry",
@@ -24,4 +25,7 @@ __all__ = [
     "VersionContext",
     "replay_to_sec",
     "render_template",
+    "EWC",
+    "TaskRegistry",
+    "train_task",
 ]
